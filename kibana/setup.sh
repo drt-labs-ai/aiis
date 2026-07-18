@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Import AIIS Kibana dashboards and configure index pattern
+# Set up AIIS Kibana dashboards.
+#
+# Creates the data view, all visualizations, and two dashboards via the
+# Kibana REST API using the Python script at scripts/create_kibana_dashboards.py.
+#
+# Usage:
+#   bash kibana/setup.sh
+#   KIBANA_URL=http://myhost:5601 bash kibana/setup.sh
 set -euo pipefail
 
 KIBANA_URL="${KIBANA_URL:-http://localhost:5601}"
 ES_URL="${ES_URL:-http://localhost:9200}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Waiting for Kibana to be ready..."
 until curl -sf "${KIBANA_URL}/api/status" > /dev/null 2>&1; do
@@ -11,39 +19,18 @@ until curl -sf "${KIBANA_URL}/api/status" > /dev/null 2>&1; do
 done
 echo "Kibana is ready."
 
-# Create index pattern
-echo "Creating index pattern: aiis-events-*"
-curl -sf -X POST "${KIBANA_URL}/api/saved_objects/index-pattern/aiis-events-pattern" \
-  -H "kbn-xsrf: true" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "attributes": {
-      "title": "aiis-events-*",
-      "timeFieldName": "timestamp"
-    }
-  }' || echo "(index pattern may already exist)"
-
-# Import dashboards
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/dashboards/aiis-dashboards.ndjson" ]; then
-  echo "Importing dashboards..."
-  curl -sf -X POST "${KIBANA_URL}/api/saved_objects/_import?overwrite=true" \
-    -H "kbn-xsrf: true" \
-    --form "file=@${SCRIPT_DIR}/dashboards/aiis-dashboards.ndjson"
-  echo ""
-fi
+echo ""
+echo "Creating AIIS dashboards..."
+KIBANA_URL="${KIBANA_URL}" uv run --directory "${REPO_ROOT}" \
+  python scripts/create_kibana_dashboards.py
 
 echo ""
 echo "Kibana setup complete!"
 echo "Access Kibana at: ${KIBANA_URL}"
 echo ""
 echo "Available dashboards:"
-echo "  - AIIS Workflow Overview"
-echo "  - AIIS Agent Performance"
-echo "  - AIIS MCP Tool Usage"
-echo "  - AIIS A2A Communication"
-echo "  - AIIS RAG Retrieval"
-echo "  - AIIS Errors & Retries"
+echo "  AIIS — Issue Status : ${KIBANA_URL}/app/dashboards#/view/aiis-issue-status-dashboard"
+echo "  AIIS — Trace & Debug: ${KIBANA_URL}/app/dashboards#/view/aiis-trace-debug-dashboard"
 echo ""
-echo "Explore events with:"
+echo "Explore raw events:"
 echo "  GET ${ES_URL}/aiis-events-*/_search"

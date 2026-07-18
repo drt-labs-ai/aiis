@@ -7,6 +7,9 @@ import os
 import uuid
 from typing import Any
 
+from dotenv import load_dotenv
+load_dotenv()  # load .env before any module reads os.getenv at import time
+
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 

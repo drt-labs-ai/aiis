@@ -174,7 +174,7 @@ class BaseDomainAgent(ABC):
             )
 
         # Generate summary
-        summary, root_cause, recommended_actions = self._synthesize(
+        summary, root_cause, recommended_actions = await self._synthesize(
             request, evidence, knowledge_retrieved, iteration, confidence
         )
         total_duration = int((time.monotonic() - start_time) * 1000)
@@ -250,7 +250,7 @@ class BaseDomainAgent(ABC):
         evidence_boost = min(len(evidence) * 0.03, 0.1)
         return min(round(base + rag_boost + evidence_boost, 2), 0.97)
 
-    def _synthesize(
+    async def _synthesize(
         self,
         request: InvestigationRequest,
         evidence: list[EvidenceItem],
@@ -258,6 +258,11 @@ class BaseDomainAgent(ABC):
         iterations: int,
         confidence: float,
     ) -> tuple[str, str, list[str]]:
+        llm_result = await self._llm_synthesize(request, evidence, iterations, confidence)
+        if llm_result:
+            return llm_result
+
+        # Fallback: rule-based synthesis when LLM is unavailable
         domain_label = self.domain.value.replace("-", " ").title()
         top_sources = [e.source for e in sorted(evidence, key=lambda x: x.relevance_score, reverse=True)[:3]]
 
@@ -277,7 +282,6 @@ class BaseDomainAgent(ABC):
             f"{self.domain.value} service behavior. "
             f"Evidence gathered from: {', '.join(top_sources[:3])}."
         )
-
         recommended_actions = [
             f"Review {self.domain.value} service logs in Kibana for error patterns",
             f"Check service health dashboard for {', '.join(self.primary_services[:2])}",
@@ -285,8 +289,65 @@ class BaseDomainAgent(ABC):
             f"Verify feature flags and configuration for impacted services",
             f"Escalate to {self.domain.value} team if issue persists > 2 hours",
         ]
-
         return summary, root_cause, recommended_actions
+
+    async def _llm_synthesize(
+        self,
+        request: InvestigationRequest,
+        evidence: list[EvidenceItem],
+        iterations: int,
+        confidence: float,
+    ) -> tuple[str, str, list[str]] | None:
+        """Use LLM to generate a richer investigation report. Returns None on failure."""
+        import json, re
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from src.llm.factory import get_llm, LLMRole
+
+        llm = get_llm(LLMRole.DOMAIN_AGENT, max_tokens=1024)
+        if llm is None:
+            return None
+
+        domain_label = self.domain.value.replace("-", " ").title()
+        evidence_text = "\n".join(
+            f"[{e.source}] (score={e.relevance_score:.2f}): {e.content[:300]}"
+            for e in evidence[:6]
+        )
+
+        system = (
+            f"You are a {domain_label} domain expert for an e-commerce platform. "
+            f"Analyze the investigation evidence and produce a structured JSON report."
+        )
+        user = (
+            f"Issue: {request.title}\n"
+            f"Description: {request.description[:500]}\n\n"
+            f"Evidence gathered after {iterations} investigation iteration(s) "
+            f"(confidence={confidence:.0%}):\n{evidence_text}\n\n"
+            f"Respond with JSON only:\n"
+            f'{{"summary": "...", "root_cause": "...", "recommended_actions": ["action1", "action2", "action3"]}}'
+        )
+
+        try:
+            response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+            text = response.content
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if not match:
+                return None
+            parsed = json.loads(match.group())
+            summary = parsed.get("summary", "")
+            root_cause = parsed.get("root_cause", "")
+            actions = parsed.get("recommended_actions", [])
+            # LLMs sometimes return nested objects instead of plain strings
+            if not isinstance(summary, str):
+                summary = json.dumps(summary)
+            if not isinstance(root_cause, str):
+                root_cause = json.dumps(root_cause)
+            if not isinstance(actions, list):
+                actions = [str(actions)]
+            if summary and root_cause:
+                return summary, root_cause, [str(a) for a in actions]
+        except Exception as exc:
+            logger.warning(f"LLM synthesis failed for {self.agent_id}: {exc}")
+        return None
 
     async def handle_a2a_message(self, payload: dict) -> dict:
         """Handle incoming A2A messages (registered as transport handler)."""

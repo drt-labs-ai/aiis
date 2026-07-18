@@ -1,7 +1,7 @@
 """LangGraph shared state definition."""
 from __future__ import annotations
 from typing import Any, Annotated
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import operator
 from src.a2a.messages import Domain, InvestigationResult, InvestigationRequest
 
@@ -40,3 +40,14 @@ class WorkflowState(BaseModel):
     completed: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
+
+    @field_validator("assignees", "applied_labels", "labels", mode="before")
+    @classmethod
+    def coerce_to_str_list(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return [str(v)]

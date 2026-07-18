@@ -70,28 +70,8 @@ def _keyword_classify(title: str, description: str) -> tuple[Domain, float]:
 
 
 def _get_llm():
-    """Return the best available LLM: Anthropic first, then Ollama, then None."""
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if anthropic_key:
-        try:
-            from langchain_anthropic import ChatAnthropic
-            return ChatAnthropic(
-                model="claude-haiku-4-5-20251001",
-                anthropic_api_key=anthropic_key,
-                max_tokens=512,
-            )
-        except Exception:
-            pass
-
-    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-    try:
-        from langchain_ollama import ChatOllama
-        return ChatOllama(base_url=ollama_url, model=ollama_model, num_predict=512)
-    except Exception:
-        pass
-
-    return None
+    from src.llm.factory import get_llm, LLMRole
+    return get_llm(LLMRole.SUPERVISOR, max_tokens=512)
 
 
 async def _llm_classify(title: str, description: str) -> dict[str, Any] | None:
@@ -138,7 +118,10 @@ class SupervisorAgent:
             domain = Domain.PRE_PURCHASE if "pre" in domain_str else Domain.POST_PURCHASE
             routing_reason = llm_result.get("reasoning", "LLM classification")
             suggested_labels = llm_result.get("suggested_labels", [domain_str])
-            assignees = llm_result.get("suggested_assignees", [f"team-{domain_str}"])
+            raw_assignees = llm_result.get("suggested_assignees", [f"team-{domain_str}"])
+            assignees = raw_assignees if isinstance(raw_assignees, list) else [str(raw_assignees)]
+            raw_labels = llm_result.get("suggested_labels", [domain_str])
+            suggested_labels = raw_labels if isinstance(raw_labels, list) else [str(raw_labels)]
             confidence = llm_result.get("confidence", 0.7)
         else:
             domain, confidence = _keyword_classify(state.title, state.description)
