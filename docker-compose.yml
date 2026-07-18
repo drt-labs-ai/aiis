@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  # ─── Core Application ────────────────────────────────────────────────────────
+  aiis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiis-app
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_REPO=${GITHUB_REPO:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+      - KNOWLEDGE_BASE_DIR=/app/knowledge-base
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MAX_INVESTIGATION_ITERATIONS=${MAX_INVESTIGATION_ITERATIONS:-4}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.75}
+    volumes:
+      - ./data:/app/data
+      - ./knowledge-base:/app/knowledge-base:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Elasticsearch ────────────────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: aiis-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=aiis-cluster
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  # ─── Kibana ──────────────────────────────────────────────────────────────────
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: aiis-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_SYSTEM_PASSWORD=changeme
+      - xpack.security.enabled=false
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - kibana_data:/usr/share/kibana/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ─── Kibana Dashboard Importer ────────────────────────────────────────────────
+  kibana-setup:
+    image: curlimages/curl:latest
+    container_name: aiis-kibana-setup
+    depends_on:
+      kibana:
+        condition: service_healthy
+    volumes:
+      - ./kibana/dashboards:/dashboards:ro
+    command: >
+      sh -c "
+        echo 'Importing Kibana index patterns...' &&
+        curl -s -X POST 'http://kibana:5601/api/saved_objects/index-pattern/aiis-events-*' \
+          -H 'kbn-xsrf: true' \
+          -H 'Content-Type: application/json' \
+          -d '{\"attributes\":{\"title\":\"aiis-events-*\",\"timeFieldName\":\"timestamp\"}}' || true &&
+        echo 'Kibana setup complete'
+      "
+    restart: "no"
+
+volumes:
+  elasticsearch_data:
+    driver: local
+  kibana_data:
+    driver: local
