@@ -87,9 +87,14 @@ async def ensure_index_template() -> None:
         },
     }
     try:
-        await client.indices.put_index_template(name="aiis-template", body=template)
+        # ES 8.x: pass template fields as keyword args instead of body=
+        await client.indices.put_index_template(
+            name="aiis-template",
+            index_patterns=template["index_patterns"],
+            template=template["template"],
+        )
         _es_reachable = True
         logger.info("Elasticsearch index template created/updated")
     except Exception as exc:
-        _es_reachable = False
-        logger.info("Elasticsearch not reachable; observability events will be logged only (%s)", type(exc).__name__)
+        # Template failure is non-fatal — events can still be ingested without it
+        logger.info("ES template setup skipped (%s); events will still be ingested", type(exc).__name__)

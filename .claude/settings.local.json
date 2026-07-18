@@ -10,7 +10,14 @@
       "Bash(git init *)",
       "Bash(git add *)",
       "Bash(git rm *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(python3 -c \"import sys,json; h=json.load\\(sys.stdin\\); print\\(f'  status={h[\\\\\"status\\\\\"]}  nodes={h[\\\\\"number_of_nodes\\\\\"]}'\\)\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=llama3.1:8b ELASTICSEARCH_URL=http://localhost:9200 .venv/bin/python scripts/simulate_issue.py --domain pre-purchase)",
+      "Bash(OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=llama3.1:8b ELASTICSEARCH_URL=http://localhost:9200 .venv/bin/python scripts/simulate_issue.py --domain post-purchase --sample 1)",
+      "Bash(.venv/bin/pip show *)",
+      "Bash(OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=llama3.1:8b ELASTICSEARCH_URL=http://localhost:9200 .venv/bin/python scripts/simulate_issue.py --domain post-purchase)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
