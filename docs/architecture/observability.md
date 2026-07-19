@@ -23,7 +23,7 @@
 5. [A Typical Workflow — Event Timeline](#5-a-typical-workflow--event-timeline)
 6. [Kibana Dashboards](#6-kibana-dashboards)
    - [Setup](#61-setup)
-   - [Available Dashboards](#62-available-dashboards)
+   - [Available Dashboards](#62-available-dashboards) — Issue Status, Trace & Debug, A2A Payloads, MCP Payloads, RAG Payloads
    - [Viewing a Trace in Kibana Discover](#63-viewing-a-trace-in-kibana-discover)
 7. [Configuration Reference](#7-configuration-reference)
 8. [Troubleshooting](#8-troubleshooting)
@@ -497,57 +497,60 @@ bash kibana/setup.sh
 uv run python scripts/create_kibana_dashboards.py
 ```
 
-The script creates a Kibana data view (`aiis-events-*`) and two complete dashboards containing **32 panels** total — no manual import required.
+The script creates a Kibana data view (`aiis-events-*`) and **5 dashboards** — no manual import required.
 
 ### 6.2 Available Dashboards
 
 #### AIIS — Issue Status
 `http://localhost:5601/app/dashboards#/view/aiis-issue-status-dashboard`
 
-Shows the health and outcome of every investigation workflow.
-
-| Panel | What it shows |
-|---|---|
-| Total Workflows | Count of `WORKFLOW_STARTED` events |
-| Completed | Count of `WORKFLOW_COMPLETED` events |
-| Failed | Count of `WORKFLOW_FAILED` events (0 = healthy) |
-| Pre-Purchase Issues | Issues routed to the pre-purchase agent |
-| Post-Purchase Issues | Issues routed to the post-purchase agent |
-| MCP Tool Calls | Total tool invocations across all agents |
-| Issues by Domain | Donut chart: pre-purchase vs post-purchase split |
-| Workflow Status | Donut chart: SUCCESS / FAILURE distribution |
-| Workflows Over Time | Area chart of `WORKFLOW_STARTED` events over the selected time range |
-| Events Per Agent/Team | Horizontal bar chart showing event volume per agent |
-| Events Per Status | Horizontal bar of event status distribution |
-| Investigation Duration | Histogram of `duration_ms` for `INVESTIGATION_FINISHED` events |
-| Issue Summary Table | Per-issue × agent × status breakdown with event counts |
-
-**Tip:** Click any pie slice or bar segment to add a KQL filter that propagates to all panels on the dashboard.
+Workflow health and outcomes: total/completed/failed counts, domain split, duration histogram, per-issue resolution table.
 
 #### AIIS — Trace & Debug
 `http://localhost:5601/app/dashboards#/view/aiis-trace-debug-dashboard`
 
-Full observability into the internal mechanics of every request.
+Full internal observability: event timeline, span trace table (`trace_id × span_id × agent × event_type`), agent activity, duration by event type. Use this to follow any single request end-to-end.
+
+#### AIIS — A2A & Supervisor Payloads
+`http://localhost:5601/app/dashboards#/view/aiis-a2a-payload-dashboard`
+
+Shows the **complete payload** for every supervisor decision and A2A message.
 
 | Panel | What it shows |
 |---|---|
-| Total Events | All events in the selected time range |
-| MCP Tool Calls | Count of `MCP_TOOL_CALL` events |
-| A2A Messages | Count of `A2A_REQUEST + A2A_RESPONSE` events |
-| RAG Searches | Count of `RAG_SEARCH` events |
-| Error Events | Count where `status: ERROR` |
-| Workflows | Count of `WORKFLOW_STARTED` events |
-| Event Timeline | Full-width stacked area chart — all 19 event types as colour-coded series |
-| Events by Agent | Horizontal bar of event volume per agent |
-| Event Type Distribution | Donut of all 19 event types |
-| Avg Duration by Event Type | Horizontal bar of average `duration_ms` grouped by event type |
-| Agent Activity Over Time | Stacked area chart split by agent — see who is active when |
-| Investigation Phase Events | Donut of `INVESTIGATION_STARTED/ITERATION/FINISHED` events |
-| MCP Tool Events by Status | Bar chart of MCP events grouped by status |
-| A2A Message Types | Donut of `A2A_REQUEST/RESPONSE/ERROR` events |
-| RAG Activity Over Time | Area chart of RAG search activity |
-| Span Trace Table | `trace_id × span_id × agent × event_type × status` — for reconstructing call trees |
-| Issue × Workflow × Agent | Per-issue workflow ID mapping with event type breakdown |
+| Domain Routing pie | Classified domain distribution from `SUPERVISOR_DECISION` events |
+| Supervisor Decisions table | `payload.domain`, `payload.confidence`, `payload.routing_reason`, `payload.llm_result.reasoning` — full LLM reasoning text |
+| A2A Requests table | `payload.assigned_domain`, `payload.title`, `payload.description` — the issue sent to the domain agent |
+| A2A Responses table | `payload.status`, `payload.confidence`, `payload.summary`, `payload.root_cause` — the full investigation result |
+
+**Tip:** Expand any table row to see the complete raw document, including `payload.recommended_actions`, `payload.evidence`, and `payload.investigation_steps`.
+
+#### AIIS — MCP Tool Payloads
+`http://localhost:5601/app/dashboards#/view/aiis-mcp-payload-dashboard`
+
+Shows the **complete payload** for every MCP tool invocation.
+
+| Panel | What it shows |
+|---|---|
+| Tool Call Frequency bar | Which tools are called most often |
+| Avg Duration by Tool bar | Latency profile per tool |
+| MCP Tool Calls table | `payload.tool`, `payload.duration_ms`, `payload.is_error`, `payload.response.text` — full tool response |
+
+**Tip:** Expand any row to see `payload.arguments` (exact input parameters) and the complete tool response.
+
+#### AIIS — RAG Retrieval Payloads
+`http://localhost:5601/app/dashboards#/view/aiis-rag-payload-dashboard`
+
+Shows the **complete payload** for every RAG search and document retrieval.
+
+| Panel | What it shows |
+|---|---|
+| RAG Searches by Agent bar | Which agents are searching and how often |
+| RAG Searches by Domain pie | Domain distribution of knowledge base queries |
+| RAG Search Queries table | `payload.query`, `payload.domain`, `payload.top_k` — the exact query sent |
+| RAG Documents Retrieved table | `payload.query`, `payload.doc_count`, `payload.documents.source`, `payload.documents.content` |
+
+**Tip:** Expand any retrieval row to see the full document list with source paths, content excerpts, and relevance scores.
 
 **How to trace a single request end-to-end:**
 
