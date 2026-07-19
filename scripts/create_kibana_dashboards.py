@@ -422,20 +422,25 @@ def create_issue_status_dashboard(client: httpx.Client) -> None:
     print("\n[2] Issue Status Dashboard visualizations")
     p = "aiis-is-"  # id prefix
 
-    # ── Row 1: stat metrics (y=0, h=8) ─────────────────────────────────────
-    # 6 stats × w=8 each = 48 total
+    # ── Row 1: stat metrics (y=0, h=8) — 8 stats across 48 cols ────────────
     v1 = save_obj(client, "visualization", f"{p}m-total",
                   *v_metric("Total Workflows", kql="event_type: WORKFLOW_STARTED"))
     v2 = save_obj(client, "visualization", f"{p}m-completed",
                   *v_metric("Completed", kql="event_type: WORKFLOW_COMPLETED"))
     v3 = save_obj(client, "visualization", f"{p}m-failed",
-                  *v_metric("Failed", kql="event_type: WORKFLOW_FAILED"))
+                  *v_metric("Failed", kql="event_type: WORKFLOW_FAILED OR status: FAILED"))
     v4 = save_obj(client, "visualization", f"{p}m-pre-purchase",
                   *v_metric("Pre-Purchase Issues", kql="agent: pre-purchase-agent AND event_type: INVESTIGATION_FINISHED"))
     v5 = save_obj(client, "visualization", f"{p}m-post-purchase",
                   *v_metric("Post-Purchase Issues", kql="agent: post-purchase-agent AND event_type: INVESTIGATION_FINISHED"))
     v6 = save_obj(client, "visualization", f"{p}m-mcp-calls",
                   *v_metric("MCP Tool Calls", kql="event_type: MCP_TOOL_CALL"))
+    v6b = save_obj(client, "visualization", f"{p}m-avg-confidence",
+                   *v_metric_avg("Avg Confidence", "payload.confidence",
+                                 kql="event_type: A2A_RESPONSE"))
+    v6c = save_obj(client, "visualization", f"{p}m-avg-iterations",
+                   *v_metric_avg("Avg Iterations", "payload.iterations",
+                                 kql="event_type: A2A_RESPONSE"))
 
     # ── Row 2: pie charts (y=8, h=20) ──────────────────────────────────────
     v7 = save_obj(client, "visualization", f"{p}pie-domain",
@@ -499,13 +504,15 @@ def create_issue_status_dashboard(client: httpx.Client) -> None:
     _panel_counter = 0  # reset for this dashboard
 
     panels_refs = [
-        # Row 1 — stats
-        mk_panel(v1,  x=0,  y=0,  w=8,  h=8),
-        mk_panel(v2,  x=8,  y=0,  w=8,  h=8),
-        mk_panel(v3,  x=16, y=0,  w=8,  h=8),
-        mk_panel(v4,  x=24, y=0,  w=8,  h=8),
-        mk_panel(v5,  x=32, y=0,  w=8,  h=8),
-        mk_panel(v6,  x=40, y=0,  w=8,  h=8),
+        # Row 1 — 8 stats: outcomes + quality signals
+        mk_panel(v1,   x=0,  y=0,  w=6,  h=8),
+        mk_panel(v2,   x=6,  y=0,  w=6,  h=8),
+        mk_panel(v3,   x=12, y=0,  w=6,  h=8),
+        mk_panel(v4,   x=18, y=0,  w=6,  h=8),
+        mk_panel(v5,   x=24, y=0,  w=6,  h=8),
+        mk_panel(v6,   x=30, y=0,  w=6,  h=8),
+        mk_panel(v6b,  x=36, y=0,  w=6,  h=8),   # Avg Confidence
+        mk_panel(v6c,  x=42, y=0,  w=6,  h=8),   # Avg Iterations
         # Row 2 — pies
         mk_panel(v7,  x=0,  y=8,  w=24, h=20),
         mk_panel(v8,  x=24, y=8,  w=24, h=20),
@@ -636,7 +643,7 @@ status: ERROR                 # only failures
 """
     v18 = save_obj(client, "visualization", f"{p}md-help", *v_markdown("How to Use This Dashboard", help_md))
 
-    # ── Rows 10–13: full payload searches (y=160+) ────────────────────────────
+    # ── Rows 10–15: full payload searches (y=160+) ────────────────────────────
     s1 = save_search_obj(client, f"{p}search-supervisor",
                          "Supervisor Decisions — Routing Reason & LLM Reasoning",
                          columns=["timestamp", "issue_id", "workflow_id", "payload.domain",
@@ -658,6 +665,16 @@ status: ERROR                 # only failures
                          columns=["timestamp", "agent", "payload.query", "payload.doc_count",
                                   "payload.documents.source", "payload.documents.content"],
                          kql="event_type: RAG_DOCUMENTS_RETRIEVED")
+    s5 = save_search_obj(client, f"{p}search-slow-mcp",
+                         "Slow & Failed MCP Calls (>500ms or error)",
+                         columns=["timestamp", "agent", "payload.tool", "payload.duration_ms",
+                                  "payload.is_error", "payload.response.text"],
+                         kql="event_type: MCP_TOOL_COMPLETED AND (payload.is_error: true OR duration_ms: >500)")
+    s6 = save_search_obj(client, f"{p}search-low-confidence",
+                         "Low Confidence Investigations (confidence < 0.7)",
+                         columns=["timestamp", "issue_id", "workflow_id", "payload.confidence",
+                                  "payload.status", "payload.summary", "payload.root_cause"],
+                         kql="event_type: A2A_RESPONSE AND payload.confidence: <0.7")
 
     # ── Build dashboard ──────────────────────────────────────────────────────
     print("\n[5] Creating Trace & Debug dashboard")
@@ -704,6 +721,12 @@ status: ERROR                 # only failures
         # Row 13 — RAG document payloads (expand for full document content & scores)
         mk_search_panel(s4, x=0, y=229, w=48, h=22,
                         title="RAG Documents Retrieved — expand for full content & relevance scores"),
+        # Row 14 — slow/failed MCP calls (triage performance bottlenecks)
+        mk_search_panel(s5, x=0, y=251, w=48, h=22,
+                        title="Slow & Failed MCP Calls (>500ms or error) — triage tool bottlenecks"),
+        # Row 15 — low confidence investigations (flag quality issues)
+        mk_search_panel(s6, x=0, y=273, w=48, h=20,
+                        title="Low Confidence Investigations (<0.7) — flag quality regressions"),
     ]
 
     dash_attrs, dash_refs = mk_dashboard_attrs(panels_refs)
@@ -711,6 +734,7 @@ status: ERROR                 # only failures
     dash_attrs["description"] = (
         "Full event timeline, span-level trace reconstruction, agent activity, "
         "MCP tool calls, A2A protocol messages, RAG searches, and error events. "
+        "Includes slow/failed MCP call detection and low-confidence investigation flagging. "
         "Filter by trace_id to follow any single request end-to-end."
     )
 

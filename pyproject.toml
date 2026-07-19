@@ -61,7 +61,17 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+# Unit tests must run before browser/Playwright tests: Playwright's sync API
+# leaves the asyncio event loop in an inconsistent state, which causes all
+# subsequent pytest-asyncio tests to fail with "Runner.run() cannot be called
+# from a running event loop". Listing unit tests first avoids the cascade.
+testpaths = [
+    "tests/test_a2a.py",
+    "tests/test_mcp_tools.py",
+    "tests/test_supervisor.py",
+    "tests/test_workflow.py",
+    "tests/browser",
+]
 
 [dependency-groups]
 dev = [

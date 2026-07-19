@@ -1,8 +1,7 @@
 """Agent registry for discovery and routing."""
 from __future__ import annotations
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from .messages import Domain
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,6 @@ class AgentRegistration:
     domain: Domain | None
     description: str
     capabilities: list[str]
-    registered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     is_healthy: bool = True
 
 
@@ -49,9 +47,6 @@ class AgentRegistry:
 
     def get(self, agent_id: str) -> AgentRegistration | None:
         return self._agents.get(agent_id)
-
-    def all_agents(self) -> list[AgentRegistration]:
-        return list(self._agents.values())
 
 
 # Singleton

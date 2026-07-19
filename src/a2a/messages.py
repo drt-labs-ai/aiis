@@ -65,10 +65,3 @@ class InvestigationResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class A2AError(BaseModel):
-    message_type: MessageType = MessageType.ERROR
-    trace_id: str
-    workflow_id: str
-    error_code: str
-    error_message: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

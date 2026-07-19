@@ -6,7 +6,6 @@ from .messages import (
     Domain,
     InvestigationRequest,
     InvestigationResult,
-    InvestigationStatus,
 )
 from .registry import get_registry
 from .transport import get_transport

@@ -146,7 +146,7 @@ def _format_github_comment(state: WorkflowState) -> str:
         return "Investigation failed to produce a result."
 
     confidence_pct = f"{result.confidence:.0%}"
-    domain_label = (state.assigned_domain or "unknown").replace("-", " ").title() if state.assigned_domain else "Unknown"
+    domain_label = state.assigned_domain.replace("-", " ").title() if state.assigned_domain else "Unknown"
 
     lines = [
         "## 🤖 AI Investigation Report",

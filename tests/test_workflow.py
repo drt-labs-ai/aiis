@@ -1,15 +1,14 @@
 """Integration tests for the LangGraph workflow."""
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from src.agents.state import WorkflowState
 from src.a2a.messages import (
-    Domain, InvestigationResult, InvestigationStatus, InvestigationRequest
+    Domain, InvestigationResult, InvestigationStatus,
 )
 
 
 @pytest.fixture(autouse=True)
 def register_agents():
-    """Register domain agents before each test."""
     from src.agents.domain import create_pre_purchase_agent, create_post_purchase_agent
     create_pre_purchase_agent()
     create_post_purchase_agent()
@@ -59,26 +58,22 @@ class TestWorkflowNodes:
             result = await node_triage(state)
         assert result.assigned_domain is not None
 
-    @pytest.mark.asyncio
-    async def test_route_after_triage_error_path(self):
+    def test_route_after_triage_error_path(self):
         from src.workflow.graph import route_after_triage
         state = WorkflowState(issue_id=1, error="Something failed")
         assert route_after_triage(state) == "error"
 
-    @pytest.mark.asyncio
-    async def test_route_after_triage_happy_path(self):
+    def test_route_after_triage_happy_path(self):
         from src.workflow.graph import route_after_triage
         state = WorkflowState(issue_id=1, assigned_domain=Domain.PRE_PURCHASE)
         assert route_after_triage(state) == "delegate"
 
-    @pytest.mark.asyncio
-    async def test_route_after_delegate_error(self):
+    def test_route_after_delegate_error(self):
         from src.workflow.graph import route_after_delegate
         state = WorkflowState(issue_id=1, error="A2A failed")
         assert route_after_delegate(state) == "error"
 
-    @pytest.mark.asyncio
-    async def test_route_after_delegate_success(self):
+    def test_route_after_delegate_success(self):
         from src.workflow.graph import route_after_delegate
         result = _mock_investigation_result("t1", "wf1", 1)
         state = WorkflowState(issue_id=1, investigation_result=result)
@@ -102,7 +97,6 @@ class TestFullWorkflow:
         with patch("src.agents.supervisor.agent.add_labels", new_callable=AsyncMock), \
              patch("src.agents.supervisor.agent.assign_issue", new_callable=AsyncMock), \
              patch("src.agents.supervisor.agent._llm_classify", new_callable=AsyncMock, return_value=None), \
-             patch("src.mcp_server.tools.github_tools.add_comment", new_callable=AsyncMock, return_value={"mock": True}), \
              patch("src.workflow.graph.add_comment", new_callable=AsyncMock, return_value={"mock": True}), \
              patch("src.kafka.producer.publish", new_callable=AsyncMock, return_value=True) as mock_publish:
 

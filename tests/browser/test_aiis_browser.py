@@ -253,7 +253,7 @@ class TestKibana:
 
     def test_kibana_dev_tools(self, browser_page: Page):
         """Open Kibana Dev Tools console."""
-        browser_page.goto(f"{KIBANA_URL}/app/dev_tools", wait_until="networkidle", timeout=30000)
+        browser_page.goto(f"{KIBANA_URL}/app/dev_tools", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
         screenshot(browser_page, "14_kibana_dev_tools")
         print(f"  ✅ Kibana Dev Tools page loaded")

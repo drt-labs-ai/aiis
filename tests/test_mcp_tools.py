@@ -75,4 +75,4 @@ class TestGitHubTools:
     @pytest.mark.asyncio
     async def test_add_comment_mock_without_credentials(self):
         result = await add_comment(42, "Test comment body")
-        assert "mock" in result or "issue_number" in result
+        assert "mock" in result

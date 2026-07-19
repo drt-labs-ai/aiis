@@ -13,7 +13,6 @@ from src.a2a.messages import (
 from src.mcp_server.server import get_mcp_server
 from src.observability.elasticsearch_client import ingest_event
 from src.observability.events import EventType, ObservabilityEvent
-from src.observability.tracer import get_trace_context
 from src.rag.retriever import get_retriever
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,6 @@ class BaseDomainAgent(ABC):
         ...
 
     async def investigate(self, request: InvestigationRequest) -> InvestigationResult:
-        ctx = get_trace_context()
         start_time = time.monotonic()
         evidence: list[EvidenceItem] = []
         steps: list[str] = []
@@ -199,11 +197,11 @@ class BaseDomainAgent(ABC):
 
         # Generate summary
         summary, root_cause, recommended_actions = await self._synthesize(
-            request, evidence, knowledge_retrieved, iteration, confidence
+            request, evidence, iteration, confidence
         )
         total_duration = int((time.monotonic() - start_time) * 1000)
 
-        status = InvestigationStatus.COMPLETED if confidence >= CONFIDENCE_THRESHOLD else InvestigationStatus.COMPLETED
+        status = InvestigationStatus.COMPLETED if confidence >= CONFIDENCE_THRESHOLD else InvestigationStatus.FAILED
 
         result = InvestigationResult(
             trace_id=request.trace_id,
@@ -278,7 +276,6 @@ class BaseDomainAgent(ABC):
         self,
         request: InvestigationRequest,
         evidence: list[EvidenceItem],
-        knowledge_retrieved: list[str],
         iterations: int,
         confidence: float,
     ) -> tuple[str, str, list[str]]:

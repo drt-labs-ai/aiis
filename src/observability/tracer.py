@@ -11,14 +11,6 @@ class TraceContext:
     span_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     parent_span_id: str | None = None
 
-    def child_span(self) -> "TraceContext":
-        return TraceContext(
-            trace_id=self.trace_id,
-            workflow_id=self.workflow_id,
-            span_id=str(uuid.uuid4()),
-            parent_span_id=self.span_id,
-        )
-
 
 _current_trace: ContextVar[TraceContext | None] = ContextVar("_current_trace", default=None)
 

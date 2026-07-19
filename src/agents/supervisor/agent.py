@@ -14,12 +14,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.a2a.client import get_a2a_client
-from src.a2a.messages import Domain, InvestigationRequest, InvestigationStatus
+from src.a2a.messages import Domain, InvestigationRequest
 from src.agents.state import WorkflowState
 from src.mcp_server.tools.github_tools import add_comment, add_labels, assign_issue
 from src.observability.events import EventType, ObservabilityEvent
 from src.observability.elasticsearch_client import ingest_event
-from src.observability.tracer import TraceContext, get_trace_context
+from src.observability.tracer import get_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,6 @@ class SupervisorAgent:
             domain_str = llm_result.get("domain", "pre-purchase")
             domain = Domain.PRE_PURCHASE if "pre" in domain_str else Domain.POST_PURCHASE
             routing_reason = llm_result.get("reasoning", "LLM classification")
-            suggested_labels = llm_result.get("suggested_labels", [domain_str])
             raw_assignees = llm_result.get("suggested_assignees", [f"team-{domain_str}"])
             assignees = raw_assignees if isinstance(raw_assignees, list) else [str(raw_assignees)]
             raw_labels = llm_result.get("suggested_labels", [domain_str])

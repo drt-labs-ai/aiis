@@ -83,16 +83,6 @@ graph TD
 
 Every span in this tree shares the same `trace_id` (`abc-123`). In Kibana, filtering by `trace_id: "abc-123"` returns all events for the entire workflow.
 
-To create a child span from the current context:
-
-```python
-parent_ctx = get_trace_context()
-child_ctx = parent_ctx.child_span()
-# child_ctx.trace_id  == parent_ctx.trace_id   (same trace)
-# child_ctx.span_id   == new UUID              (new span)
-# child_ctx.parent_span_id == parent_ctx.span_id
-```
-
 ### 1.3 ContextVar
 
 ```python
@@ -508,13 +498,15 @@ Workflow health and outcomes.
 
 | Panel | What it shows |
 |---|---|
-| Stat metrics (row 1) | Total/Completed/Failed workflows, Pre/Post-Purchase splits, MCP call count |
+| Stat metrics (row 1) | Total/Completed/Failed workflows, Pre/Post-Purchase splits, MCP call count, **Avg Confidence**, **Avg Iterations** |
 | Domain & Status pies | Pre-purchase vs post-purchase routing; SUCCESS/FAILURE distribution |
 | Workflows Over Time | Area chart of `WORKFLOW_STARTED` events |
 | Events Per Agent/Status | Horizontal bar charts |
 | Duration Histogram | `duration_ms` distribution for completed investigations |
 | Issue Summary Table | Per-issue × agent × status breakdown |
 | **Investigation Results** | Full payload: `payload.summary`, `payload.root_cause`, `payload.confidence` per issue — expand any row for `recommended_actions` and `evidence` |
+
+**Avg Confidence** and **Avg Iterations** metrics are computed from `A2A_RESPONSE` events. A dropping Avg Confidence or rising Avg Iterations is an early signal that the agents are struggling — typically caused by a knowledge-base gap, degraded LLM, or a noisy MCP tool response.
 
 #### AIIS — Trace & Debug
 `http://localhost:5601/app/dashboards#/view/aiis-trace-debug-dashboard`
@@ -536,8 +528,27 @@ Full internal observability. Use the time picker and KQL filter bar to drill int
 | **A2A Responses** | Full payload: `payload.summary`, `payload.root_cause`, `payload.confidence`, `payload.status` — expand for `evidence` |
 | **MCP Tool Calls** | Full payload: `payload.tool`, `payload.duration_ms`, `payload.is_error`, `payload.response.text` — expand for complete arguments |
 | **RAG Documents Retrieved** | Full payload: `payload.query`, `payload.doc_count`, `payload.documents.source`, `payload.documents.content` — expand for relevance scores |
+| **Slow & Failed MCP Calls** | Pre-filtered to `duration_ms > 500ms OR is_error: true` — immediate triage view for tool performance regressions |
+| **Low Confidence Investigations** | Pre-filtered to `payload.confidence < 0.7` — flags investigations where the agent was uncertain; check knowledge-base coverage or LLM quality |
 
 **Tip:** In any payload table, click the expand arrow (▶) on a row to see the complete raw document JSON — including arrays like `recommended_actions`, `investigation_steps`, `evidence`, and nested tool arguments.
+
+**Debugging workflow for a low-confidence alert:**
+
+```mermaid
+flowchart LR
+    A([Low Confidence panel\nshows an issue]) --> B["Find its trace_id\nin payload.trace_id"]
+    B --> C["Add KQL: trace_id: YOUR-UUID\nto Span Trace Table"]
+    C --> D{Root cause?}
+    D -- Few RAG hits --> E([Extend knowledge base\nfor that domain])
+    D -- MCP errors --> F([Check Slow & Failed\nMCP Calls panel])
+    D -- LLM degraded --> G([Check Avg Confidence\non Issue Status dashboard])
+
+    style A fill:#fee2e2,stroke:#ef4444
+    style E fill:#f0fdf4,stroke:#22c55e
+    style F fill:#fef9c3,stroke:#eab308
+    style G fill:#dbeafe,stroke:#3b82f6
+```
 
 **How to trace a single request end-to-end:**
 
