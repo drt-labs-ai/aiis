@@ -486,6 +486,13 @@ def create_issue_status_dashboard(client: httpx.Client) -> None:
 """
     v14 = save_obj(client, "visualization", f"{p}md-help", *v_markdown("Dashboard Help", help_md))
 
+    # ── Row 8: investigation results payload (y=114, h=25) ───────────────────
+    s1 = save_search_obj(client, f"{p}search-results",
+                         "Investigation Results — Summary, Root Cause & Confidence",
+                         columns=["timestamp", "issue_id", "workflow_id", "payload.status",
+                                  "payload.confidence", "payload.summary", "payload.root_cause"],
+                         kql="event_type: A2A_RESPONSE")
+
     # ── Build dashboard ──────────────────────────────────────────────────────
     print("\n[3] Creating Issue Status dashboard")
     global _panel_counter
@@ -513,6 +520,9 @@ def create_issue_status_dashboard(client: httpx.Client) -> None:
         mk_panel(v13, x=0,  y=79, w=48, h=25),
         # Row 7 — help
         mk_panel(v14, x=0,  y=104, w=48, h=10),
+        # Row 8 — investigation results payload (expand row for recommended_actions & evidence)
+        mk_search_panel(s1, x=0, y=114, w=48, h=25,
+                        title="Investigation Results — expand row for recommended_actions & evidence"),
     ]
 
     dash_attrs, dash_refs = mk_dashboard_attrs(panels_refs)
@@ -626,6 +636,29 @@ status: ERROR                 # only failures
 """
     v18 = save_obj(client, "visualization", f"{p}md-help", *v_markdown("How to Use This Dashboard", help_md))
 
+    # ── Rows 10–13: full payload searches (y=160+) ────────────────────────────
+    s1 = save_search_obj(client, f"{p}search-supervisor",
+                         "Supervisor Decisions — Routing Reason & LLM Reasoning",
+                         columns=["timestamp", "issue_id", "workflow_id", "payload.domain",
+                                  "payload.confidence", "payload.routing_reason",
+                                  "payload.llm_result.reasoning"],
+                         kql="event_type: SUPERVISOR_DECISION")
+    s2 = save_search_obj(client, f"{p}search-a2a",
+                         "A2A Responses — Summary & Root Cause",
+                         columns=["timestamp", "issue_id", "workflow_id", "payload.status",
+                                  "payload.confidence", "payload.summary", "payload.root_cause"],
+                         kql="event_type: A2A_RESPONSE")
+    s3 = save_search_obj(client, f"{p}search-mcp",
+                         "MCP Tool Calls — Arguments & Responses",
+                         columns=["timestamp", "agent", "payload.tool", "payload.duration_ms",
+                                  "payload.is_error", "payload.response.text"],
+                         kql="event_type: MCP_TOOL_COMPLETED")
+    s4 = save_search_obj(client, f"{p}search-rag",
+                         "RAG Documents Retrieved",
+                         columns=["timestamp", "agent", "payload.query", "payload.doc_count",
+                                  "payload.documents.source", "payload.documents.content"],
+                         kql="event_type: RAG_DOCUMENTS_RETRIEVED")
+
     # ── Build dashboard ──────────────────────────────────────────────────────
     print("\n[5] Creating Trace & Debug dashboard")
     global _panel_counter
@@ -659,6 +692,18 @@ status: ERROR                 # only failures
         mk_panel(v17, x=0,  y=128, w=48, h=20),
         # Row 9 — help
         mk_panel(v18, x=0,  y=148, w=48, h=12),
+        # Row 10 — supervisor decision payloads
+        mk_search_panel(s1, x=0, y=160, w=48, h=22,
+                        title="Supervisor Decisions — Routing Reason & LLM Reasoning"),
+        # Row 11 — A2A response payloads (expand for recommended_actions & evidence)
+        mk_search_panel(s2, x=0, y=182, w=48, h=22,
+                        title="A2A Responses — Summary & Root Cause (expand for full evidence)"),
+        # Row 12 — MCP tool call payloads (expand for complete arguments & response)
+        mk_search_panel(s3, x=0, y=204, w=48, h=25,
+                        title="MCP Tool Calls — Arguments & Responses (expand for full detail)"),
+        # Row 13 — RAG document payloads (expand for full document content & scores)
+        mk_search_panel(s4, x=0, y=229, w=48, h=22,
+                        title="RAG Documents Retrieved — expand for full content & relevance scores"),
     ]
 
     dash_attrs, dash_refs = mk_dashboard_attrs(panels_refs)
@@ -672,192 +717,6 @@ status: ERROR                 # only failures
     save_obj(client, "dashboard", "aiis-trace-debug-dashboard", dash_attrs, dash_refs)
 
 
-# ─── Dashboard 3: A2A & Supervisor Payloads ────────────────────────────────────
-
-def create_a2a_supervisor_payload_dashboard(client: httpx.Client) -> None:
-    print("\n[6] A2A & Supervisor Payload Dashboard visualizations")
-    p = "aiis-a2a-"
-
-    v1 = save_obj(client, "visualization", f"{p}m-workflows",
-                  *v_metric("Total Workflows", kql="event_type: WORKFLOW_STARTED"))
-    v2 = save_obj(client, "visualization", f"{p}m-supervisor",
-                  *v_metric("Supervisor Decisions", kql="event_type: SUPERVISOR_DECISION"))
-    v3 = save_obj(client, "visualization", f"{p}m-a2a-req",
-                  *v_metric("A2A Requests", kql="event_type: A2A_REQUEST"))
-    v4 = save_obj(client, "visualization", f"{p}m-a2a-resp",
-                  *v_metric("A2A Responses", kql="event_type: A2A_RESPONSE"))
-    v5 = save_obj(client, "visualization", f"{p}m-confidence",
-                  *v_metric_avg("Avg Confidence", "payload.confidence", kql="event_type: A2A_RESPONSE"))
-
-    v6 = save_obj(client, "visualization", f"{p}pie-domain",
-                  *v_pie("Domain Routing", "metadata.domain.keyword",
-                         kql="event_type: SUPERVISOR_DECISION", size=5))
-    v7 = save_obj(client, "visualization", f"{p}area-a2a",
-                  *v_area("A2A Message Traffic",
-                          kql="event_type: A2A_REQUEST OR event_type: A2A_RESPONSE",
-                          split_field="event_type"))
-
-    s1 = save_search_obj(client, f"{p}search-supervisor",
-                         "Supervisor Decisions — Routing Reason & LLM Reasoning",
-                         columns=["timestamp", "issue_id", "workflow_id", "payload.domain",
-                                  "payload.confidence", "payload.routing_reason",
-                                  "payload.llm_result.reasoning"],
-                         kql="event_type: SUPERVISOR_DECISION")
-    s2 = save_search_obj(client, f"{p}search-a2a-req",
-                         "A2A Requests — Full Issue Details",
-                         columns=["timestamp", "issue_id", "workflow_id", "payload.assigned_domain",
-                                  "payload.title", "payload.description"],
-                         kql="event_type: A2A_REQUEST")
-    s3 = save_search_obj(client, f"{p}search-a2a-resp",
-                         "A2A Responses — Investigation Results",
-                         columns=["timestamp", "issue_id", "workflow_id", "payload.status",
-                                  "payload.confidence", "payload.summary", "payload.root_cause"],
-                         kql="event_type: A2A_RESPONSE")
-
-    print("\n[7] Creating A2A & Supervisor Payload dashboard")
-    global _panel_counter
-    _panel_counter = 0
-
-    panels_refs = [
-        mk_panel(v1, x=0,  y=0, w=10, h=8),
-        mk_panel(v2, x=10, y=0, w=10, h=8),
-        mk_panel(v3, x=20, y=0, w=9,  h=8),
-        mk_panel(v4, x=29, y=0, w=9,  h=8),
-        mk_panel(v5, x=38, y=0, w=10, h=8),
-        mk_panel(v6, x=0,  y=8, w=24, h=18),
-        mk_panel(v7, x=24, y=8, w=24, h=18),
-        mk_search_panel(s1, x=0, y=26, w=48, h=20,
-                        title="Supervisor Decisions — Routing Reason & LLM Reasoning"),
-        mk_search_panel(s2, x=0, y=46, w=48, h=18,
-                        title="A2A Requests — Issue Title & Description"),
-        mk_search_panel(s3, x=0, y=64, w=48, h=22,
-                        title="A2A Responses — Summary & Root Cause (expand row for full evidence)"),
-    ]
-
-    dash_attrs, dash_refs = mk_dashboard_attrs(panels_refs)
-    dash_attrs["title"] = "AIIS — A2A & Supervisor Payloads"
-    dash_attrs["description"] = (
-        "Full payload content for supervisor decisions and A2A messages. Shows LLM routing reasoning, "
-        "issue details, investigation summaries, root causes, and confidence scores."
-    )
-
-    save_obj(client, "dashboard", "aiis-a2a-payload-dashboard", dash_attrs, dash_refs)
-
-
-# ─── Dashboard 4: MCP Tool Payloads ───────────────────────────────────────────
-
-def create_mcp_payload_dashboard(client: httpx.Client) -> None:
-    print("\n[8] MCP Tool Payload Dashboard visualizations")
-    p = "aiis-mcp2-"
-
-    v1 = save_obj(client, "visualization", f"{p}m-calls",
-                  *v_metric("MCP Tool Calls", kql="event_type: MCP_TOOL_CALL"))
-    v2 = save_obj(client, "visualization", f"{p}m-completed",
-                  *v_metric("Completed",
-                            kql="event_type: MCP_TOOL_COMPLETED AND NOT payload.is_error: true"))
-    v3 = save_obj(client, "visualization", f"{p}m-failed",
-                  *v_metric("Failed (Error)",
-                            kql="event_type: MCP_TOOL_COMPLETED AND payload.is_error: true"))
-    v4 = save_obj(client, "visualization", f"{p}m-duration",
-                  *v_metric_avg("Avg Duration (ms)", "payload.duration_ms",
-                                kql="event_type: MCP_TOOL_COMPLETED"))
-
-    v5 = save_obj(client, "visualization", f"{p}hbar-tools",
-                  *v_hbar("Tool Call Frequency", "metadata.tool.keyword",
-                          kql="event_type: MCP_TOOL_CALL", size=15))
-    v6 = save_obj(client, "visualization", f"{p}hbar-duration",
-                  *v_hbar_avg("Avg Duration (ms) by Tool", "metadata.tool.keyword",
-                              "payload.duration_ms",
-                              kql="event_type: MCP_TOOL_COMPLETED", size=15))
-
-    s1 = save_search_obj(client, f"{p}search-calls",
-                         "MCP Tool Calls — Arguments & Responses",
-                         columns=["timestamp", "agent", "payload.tool", "payload.duration_ms",
-                                  "payload.is_error", "payload.response.text"],
-                         kql="event_type: MCP_TOOL_COMPLETED")
-
-    print("\n[9] Creating MCP Tool Payload dashboard")
-    global _panel_counter
-    _panel_counter = 0
-
-    panels_refs = [
-        mk_panel(v1, x=0,  y=0, w=12, h=8),
-        mk_panel(v2, x=12, y=0, w=12, h=8),
-        mk_panel(v3, x=24, y=0, w=12, h=8),
-        mk_panel(v4, x=36, y=0, w=12, h=8),
-        mk_panel(v5, x=0,  y=8, w=24, h=18),
-        mk_panel(v6, x=24, y=8, w=24, h=18),
-        mk_search_panel(s1, x=0, y=26, w=48, h=28,
-                        title="MCP Tool Calls — Full Arguments & Responses (expand row for complete detail)"),
-    ]
-
-    dash_attrs, dash_refs = mk_dashboard_attrs(panels_refs)
-    dash_attrs["title"] = "AIIS — MCP Tool Payloads"
-    dash_attrs["description"] = (
-        "Full MCP tool call arguments and responses. Shows tool name, input parameters, "
-        "response content, duration, and error status per call."
-    )
-
-    save_obj(client, "dashboard", "aiis-mcp-payload-dashboard", dash_attrs, dash_refs)
-
-
-# ─── Dashboard 5: RAG Retrieval Payloads ──────────────────────────────────────
-
-def create_rag_payload_dashboard(client: httpx.Client) -> None:
-    print("\n[10] RAG Retrieval Payload Dashboard visualizations")
-    p = "aiis-rag2-"
-
-    v1 = save_obj(client, "visualization", f"{p}m-searches",
-                  *v_metric("RAG Searches", kql="event_type: RAG_SEARCH"))
-    v2 = save_obj(client, "visualization", f"{p}m-retrievals",
-                  *v_metric("Retrieval Events", kql="event_type: RAG_DOCUMENTS_RETRIEVED"))
-    v3 = save_obj(client, "visualization", f"{p}m-avg-docs",
-                  *v_metric_avg("Avg Docs Retrieved", "payload.doc_count",
-                                kql="event_type: RAG_DOCUMENTS_RETRIEVED"))
-
-    v4 = save_obj(client, "visualization", f"{p}hbar-agents",
-                  *v_hbar("RAG Searches by Agent", "agent",
-                          kql="event_type: RAG_SEARCH", size=10))
-    v5 = save_obj(client, "visualization", f"{p}pie-domain",
-                  *v_pie("RAG Searches by Domain", "metadata.domain.keyword",
-                         kql="event_type: RAG_SEARCH", size=5))
-
-    s1 = save_search_obj(client, f"{p}search-queries",
-                         "RAG Search Queries",
-                         columns=["timestamp", "agent", "payload.query", "payload.domain",
-                                  "payload.top_k"],
-                         kql="event_type: RAG_SEARCH")
-    s2 = save_search_obj(client, f"{p}search-docs",
-                         "RAG Documents Retrieved",
-                         columns=["timestamp", "agent", "payload.query", "payload.doc_count",
-                                  "payload.documents.source", "payload.documents.content"],
-                         kql="event_type: RAG_DOCUMENTS_RETRIEVED")
-
-    print("\n[11] Creating RAG Retrieval Payload dashboard")
-    global _panel_counter
-    _panel_counter = 0
-
-    panels_refs = [
-        mk_panel(v1, x=0,  y=0, w=16, h=8),
-        mk_panel(v2, x=16, y=0, w=16, h=8),
-        mk_panel(v3, x=32, y=0, w=16, h=8),
-        mk_panel(v4, x=0,  y=8, w=24, h=18),
-        mk_panel(v5, x=24, y=8, w=24, h=18),
-        mk_search_panel(s1, x=0, y=26, w=48, h=18, title="RAG Search Queries"),
-        mk_search_panel(s2, x=0, y=44, w=48, h=22,
-                        title="RAG Documents Retrieved — expand row for full document content & relevance scores"),
-    ]
-
-    dash_attrs, dash_refs = mk_dashboard_attrs(panels_refs)
-    dash_attrs["title"] = "AIIS — RAG Retrieval Payloads"
-    dash_attrs["description"] = (
-        "Full RAG search queries and retrieved document details. Expand any row to see the complete "
-        "document list with source paths, content, and relevance scores."
-    )
-
-    save_obj(client, "dashboard", "aiis-rag-payload-dashboard", dash_attrs, dash_refs)
-
-
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -867,16 +726,10 @@ def main() -> None:
         ensure_index_pattern(client)
         create_issue_status_dashboard(client)
         create_trace_debug_dashboard(client)
-        create_a2a_supervisor_payload_dashboard(client)
-        create_mcp_payload_dashboard(client)
-        create_rag_payload_dashboard(client)
 
     print("\n✅ All dashboards created successfully!")
     print(f"   Issue Status:  {KIBANA_URL}/app/dashboards#/view/aiis-issue-status-dashboard")
     print(f"   Trace & Debug: {KIBANA_URL}/app/dashboards#/view/aiis-trace-debug-dashboard")
-    print(f"   A2A & Supervisor:  {KIBANA_URL}/app/dashboards#/view/aiis-a2a-payload-dashboard")
-    print(f"   MCP Tool Payloads: {KIBANA_URL}/app/dashboards#/view/aiis-mcp-payload-dashboard")
-    print(f"   RAG Payloads:      {KIBANA_URL}/app/dashboards#/view/aiis-rag-payload-dashboard")
     print("\n   Open Kibana → Dashboards to view them.")
 
 

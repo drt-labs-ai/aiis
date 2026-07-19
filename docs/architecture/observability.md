@@ -23,7 +23,7 @@
 5. [A Typical Workflow — Event Timeline](#5-a-typical-workflow--event-timeline)
 6. [Kibana Dashboards](#6-kibana-dashboards)
    - [Setup](#61-setup)
-   - [Available Dashboards](#62-available-dashboards) — Issue Status, Trace & Debug, A2A Payloads, MCP Payloads, RAG Payloads
+   - [Available Dashboards](#62-available-dashboards)
    - [Viewing a Trace in Kibana Discover](#63-viewing-a-trace-in-kibana-discover)
 7. [Configuration Reference](#7-configuration-reference)
 8. [Troubleshooting](#8-troubleshooting)
@@ -497,60 +497,47 @@ bash kibana/setup.sh
 uv run python scripts/create_kibana_dashboards.py
 ```
 
-The script creates a Kibana data view (`aiis-events-*`) and **5 dashboards** — no manual import required.
+The script creates a Kibana data view (`aiis-events-*`) and **2 dashboards** with full payload sections at the bottom of each — no manual import required.
 
 ### 6.2 Available Dashboards
 
 #### AIIS — Issue Status
 `http://localhost:5601/app/dashboards#/view/aiis-issue-status-dashboard`
 
-Workflow health and outcomes: total/completed/failed counts, domain split, duration histogram, per-issue resolution table.
+Workflow health and outcomes.
+
+| Panel | What it shows |
+|---|---|
+| Stat metrics (row 1) | Total/Completed/Failed workflows, Pre/Post-Purchase splits, MCP call count |
+| Domain & Status pies | Pre-purchase vs post-purchase routing; SUCCESS/FAILURE distribution |
+| Workflows Over Time | Area chart of `WORKFLOW_STARTED` events |
+| Events Per Agent/Status | Horizontal bar charts |
+| Duration Histogram | `duration_ms` distribution for completed investigations |
+| Issue Summary Table | Per-issue × agent × status breakdown |
+| **Investigation Results** | Full payload: `payload.summary`, `payload.root_cause`, `payload.confidence` per issue — expand any row for `recommended_actions` and `evidence` |
 
 #### AIIS — Trace & Debug
 `http://localhost:5601/app/dashboards#/view/aiis-trace-debug-dashboard`
 
-Full internal observability: event timeline, span trace table (`trace_id × span_id × agent × event_type`), agent activity, duration by event type. Use this to follow any single request end-to-end.
-
-#### AIIS — A2A & Supervisor Payloads
-`http://localhost:5601/app/dashboards#/view/aiis-a2a-payload-dashboard`
-
-Shows the **complete payload** for every supervisor decision and A2A message.
+Full internal observability. Use the time picker and KQL filter bar to drill into any event.
 
 | Panel | What it shows |
 |---|---|
-| Domain Routing pie | Classified domain distribution from `SUPERVISOR_DECISION` events |
-| Supervisor Decisions table | `payload.domain`, `payload.confidence`, `payload.routing_reason`, `payload.llm_result.reasoning` — full LLM reasoning text |
-| A2A Requests table | `payload.assigned_domain`, `payload.title`, `payload.description` — the issue sent to the domain agent |
-| A2A Responses table | `payload.status`, `payload.confidence`, `payload.summary`, `payload.root_cause` — the full investigation result |
+| Stat metrics (row 1) | Total events, MCP calls, A2A messages, RAG searches, errors, workflows |
+| Event Timeline | Stacked area chart of all 19 event types |
+| Events by Agent / Event Type | Agent volume bar; event type donut |
+| Avg Duration by Event Type | Latency profile per event type |
+| Agent Activity Over Time | Per-agent stacked area chart |
+| Investigation Phases / MCP Status | Phase donut; MCP success/fail bar |
+| A2A Types / RAG Activity | A2A message type donut; RAG timeline |
+| Span Trace Table | `trace_id × span_id × agent × event_type × status` for call-tree reconstruction |
+| Issue × Workflow Table | Per-issue workflow ID mapping |
+| **Supervisor Decisions** | Full payload: `payload.routing_reason`, `payload.llm_result.reasoning`, `payload.domain`, `payload.confidence` |
+| **A2A Responses** | Full payload: `payload.summary`, `payload.root_cause`, `payload.confidence`, `payload.status` — expand for `evidence` |
+| **MCP Tool Calls** | Full payload: `payload.tool`, `payload.duration_ms`, `payload.is_error`, `payload.response.text` — expand for complete arguments |
+| **RAG Documents Retrieved** | Full payload: `payload.query`, `payload.doc_count`, `payload.documents.source`, `payload.documents.content` — expand for relevance scores |
 
-**Tip:** Expand any table row to see the complete raw document, including `payload.recommended_actions`, `payload.evidence`, and `payload.investigation_steps`.
-
-#### AIIS — MCP Tool Payloads
-`http://localhost:5601/app/dashboards#/view/aiis-mcp-payload-dashboard`
-
-Shows the **complete payload** for every MCP tool invocation.
-
-| Panel | What it shows |
-|---|---|
-| Tool Call Frequency bar | Which tools are called most often |
-| Avg Duration by Tool bar | Latency profile per tool |
-| MCP Tool Calls table | `payload.tool`, `payload.duration_ms`, `payload.is_error`, `payload.response.text` — full tool response |
-
-**Tip:** Expand any row to see `payload.arguments` (exact input parameters) and the complete tool response.
-
-#### AIIS — RAG Retrieval Payloads
-`http://localhost:5601/app/dashboards#/view/aiis-rag-payload-dashboard`
-
-Shows the **complete payload** for every RAG search and document retrieval.
-
-| Panel | What it shows |
-|---|---|
-| RAG Searches by Agent bar | Which agents are searching and how often |
-| RAG Searches by Domain pie | Domain distribution of knowledge base queries |
-| RAG Search Queries table | `payload.query`, `payload.domain`, `payload.top_k` — the exact query sent |
-| RAG Documents Retrieved table | `payload.query`, `payload.doc_count`, `payload.documents.source`, `payload.documents.content` |
-
-**Tip:** Expand any retrieval row to see the full document list with source paths, content excerpts, and relevance scores.
+**Tip:** In any payload table, click the expand arrow (▶) on a row to see the complete raw document JSON — including arrays like `recommended_actions`, `investigation_steps`, `evidence`, and nested tool arguments.
 
 **How to trace a single request end-to-end:**
 
