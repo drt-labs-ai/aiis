@@ -42,4 +42,5 @@ class ObservabilityEvent(BaseModel):
     duration_ms: int | None = None
     message: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] | None = None
     error_details: str | None = None

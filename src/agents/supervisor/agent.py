@@ -159,6 +159,14 @@ class SupervisorAgent:
             duration_ms=duration_ms,
             message=f"Routed to {domain}: {routing_reason}",
             metadata={"domain": domain, "confidence": confidence, "assignees": assignees},
+            payload={
+                "domain": str(domain),
+                "routing_reason": routing_reason,
+                "confidence": confidence,
+                "suggested_labels": suggested_labels,
+                "assignees": assignees,
+                "llm_result": llm_result,
+            },
         ))
 
         return state
@@ -191,6 +199,7 @@ class SupervisorAgent:
             status="SENT",
             message=f"Sending A2A request to {state.assigned_domain} agent",
             metadata={"domain": state.assigned_domain, "trace_id": state.trace_id},
+            payload=request.model_dump(mode="json"),
         ))
 
         client = get_a2a_client()
@@ -208,6 +217,7 @@ class SupervisorAgent:
             duration_ms=result.duration_ms,
             message=f"Investigation result received: status={result.status}, confidence={result.confidence:.2f}",
             metadata={"status": result.status, "confidence": result.confidence},
+            payload=result.model_dump(mode="json"),
         ))
 
         return state

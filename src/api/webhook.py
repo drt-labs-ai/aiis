@@ -17,6 +17,7 @@ from src.agents.state import WorkflowState
 from src.agents.domain import create_pre_purchase_agent, create_post_purchase_agent
 from src.observability.logger import configure_logging
 from src.observability.elasticsearch_client import ensure_index_template
+from src.kafka.consumer import start_consumer as start_kafka_consumer
 from src.rag.indexer import index_knowledge_base
 from src.workflow.graph import get_workflow
 
@@ -39,6 +40,8 @@ async def startup():
     create_post_purchase_agent()
     # Ensure ES template
     await ensure_index_template()
+    # Start Kafka→ES sink consumer (no-op if KAFKA_BOOTSTRAP_SERVERS not set)
+    await start_kafka_consumer()
     # Index knowledge base
     try:
         counts = index_knowledge_base(os.getenv("KNOWLEDGE_BASE_DIR", "./knowledge-base"))

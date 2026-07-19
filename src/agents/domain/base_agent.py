@@ -83,6 +83,8 @@ class BaseDomainAgent(ABC):
 
             # Step 1: RAG search
             rag_start = time.monotonic()
+            rag_query = request.title if iteration == 1 else f"{request.title} {request.description[:200]}"
+
             await ingest_event(ObservabilityEvent(
                 trace_id=request.trace_id,
                 span_id=str(uuid.uuid4()),
@@ -92,9 +94,9 @@ class BaseDomainAgent(ABC):
                 event_type=EventType.RAG_SEARCH,
                 status="STARTED",
                 message=f"RAG search: '{request.title[:60]}'",
+                payload={"query": rag_query, "domain": self.domain.value, "top_k": 3},
             ))
 
-            rag_query = request.title if iteration == 1 else f"{request.title} {request.description[:200]}"
             rag_docs = retriever.search(query=rag_query, domain=self.domain.value, top_k=3)
             rag_duration = int((time.monotonic() - rag_start) * 1000)
 
@@ -121,6 +123,20 @@ class BaseDomainAgent(ABC):
                 duration_ms=rag_duration,
                 message=f"Retrieved {len(rag_docs)} documents",
                 metadata={"doc_count": len(rag_docs), "sources": [d.source for d in rag_docs]},
+                payload={
+                    "query": rag_query,
+                    "domain": self.domain.value,
+                    "doc_count": len(rag_docs),
+                    "documents": [
+                        {
+                            "source": d.source,
+                            "filename": d.filename,
+                            "content": d.content,
+                            "relevance_score": d.relevance_score,
+                        }
+                        for d in rag_docs
+                    ],
+                },
             ))
 
             # Step 2: MCP tool calls
@@ -137,6 +153,7 @@ class BaseDomainAgent(ABC):
                     status="STARTED",
                     message=f"Calling MCP tool: {tool_name}",
                     metadata={"tool": tool_name, "args": tool_args},
+                    payload={"tool": tool_name, "arguments": tool_args},
                 ))
 
                 result = await mcp.call_tool(tool_name, tool_args)
@@ -154,6 +171,13 @@ class BaseDomainAgent(ABC):
                     duration_ms=tool_duration,
                     message=f"MCP tool '{tool_name}' {'failed' if result.is_error else 'completed'}",
                     metadata={"tool": tool_name, "duration_ms": tool_duration},
+                    payload={
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "duration_ms": tool_duration,
+                        "is_error": result.is_error,
+                        "response": result.content,
+                    },
                 ))
 
                 if not result.is_error and result.content:

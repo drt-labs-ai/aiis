@@ -220,41 +220,65 @@ Every event stored in Elasticsearch has this structure:
 
 ```python
 class ObservabilityEvent(BaseModel):
-    timestamp: datetime          # When the event occurred (UTC)
-    trace_id: str                # Links all events in one workflow
-    span_id: str                 # Unique to this event/operation
-    parent_span_id: str | None   # Parent span, if any
-    workflow_id: str             # Same as trace_id for this workflow
-    issue_id: int | None         # GitHub issue number
-    agent: str                   # Which agent emitted this event
-    event_type: EventType        # One of the 19 types above
-    status: str                  # "SUCCESS", "FAILURE", etc.
-    duration_ms: int | None      # How long the operation took (milliseconds)
-    message: str                 # Human-readable description
-    metadata: dict[str, Any]     # Any extra key-value data
-    error_details: str | None    # Stack trace or error message on failure
+    timestamp: datetime              # When the event occurred (UTC)
+    trace_id: str                    # Links all events in one workflow
+    span_id: str                     # Unique to this event/operation
+    parent_span_id: str | None       # Parent span, if any
+    workflow_id: str                 # Same as trace_id for this workflow
+    issue_id: int | None             # GitHub issue number
+    agent: str                       # Which agent emitted this event
+    event_type: EventType            # One of the 19 types above
+    status: str                      # "SUCCESS", "FAILURE", etc.
+    duration_ms: int | None          # How long the operation took (milliseconds)
+    message: str                     # Human-readable description
+    metadata: dict[str, Any]         # Summary key-value data (always populated)
+    payload: dict[str, Any] | None   # Complete request/response body (see below)
+    error_details: str | None        # Stack trace or error message on failure
 ```
 
-**Example event document in Elasticsearch:**
+#### The `payload` Field
+
+The `payload` field carries the **complete request and response body** for each communication event. Unlike `metadata` (which contains a brief summary), `payload` contains every field of the original message with no truncation.
+
+| `event_type` | `payload` contents |
+|---|---|
+| `A2A_REQUEST` | Full `InvestigationRequest` — `trace_id`, `workflow_id`, `issue_id`, `title`, `description`, `labels`, `assigned_domain`, `timestamp` |
+| `A2A_RESPONSE` | Full `InvestigationResult` — `status`, `confidence`, `summary`, `root_cause`, `recommended_actions`, `investigation_steps`, `evidence`, `knowledge_retrieved`, `iterations`, `duration_ms` |
+| `SUPERVISOR_DECISION` | `domain`, `routing_reason`, `confidence`, `suggested_labels`, `assignees`, `llm_result` (raw LLM JSON or `null`) |
+| `MCP_TOOL_CALL` | `tool`, `arguments` (exact dict passed to the tool) |
+| `MCP_TOOL_COMPLETED` / `MCP_TOOL_FAILED` | `tool`, `arguments`, `duration_ms`, `is_error`, `response` (full tool result content) |
+| `RAG_SEARCH` | `query`, `domain`, `top_k` |
+| `RAG_DOCUMENTS_RETRIEVED` | `query`, `domain`, `doc_count`, `documents` (list with `source`, `filename`, full `content`, `relevance_score` for every retrieved doc) |
+
+**Example `A2A_RESPONSE` event in Elasticsearch:**
 
 ```json
 {
   "timestamp": "2024-11-15T14:32:07.451Z",
   "trace_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "span_id": "f0e1d2c3-b4a5-6789-0abc-def012345678",
-  "parent_span_id": "11223344-5566-7788-99aa-bbccddeeff00",
   "workflow_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "issue_id": 456,
-  "agent": "pre_purchase_agent",
-  "event_type": "RAG_DOCUMENTS_RETRIEVED",
-  "status": "SUCCESS",
-  "duration_ms": 87,
-  "message": "Retrieved 5 documents for query 'EU checkout 500 error'",
-  "metadata": {
-    "query": "EU checkout 500 error",
-    "top_k": 5,
-    "documents_found": 5,
-    "top_score": 0.87
+  "agent": "supervisor",
+  "event_type": "A2A_RESPONSE",
+  "status": "RECEIVED",
+  "duration_ms": 4820,
+  "message": "Investigation result received: status=completed, confidence=0.91",
+  "metadata": {"status": "completed", "confidence": 0.91},
+  "payload": {
+    "trace_id": "a1b2c3d4-...",
+    "workflow_id": "a1b2c3d4-...",
+    "issue_id": 456,
+    "status": "completed",
+    "confidence": 0.91,
+    "summary": "The EU checkout 500 error is caused by a VAT validation bug...",
+    "root_cause": "The `calculate_vat()` function does not handle IE country codes...",
+    "recommended_actions": ["Apply hotfix for VAT calculation", "Deploy to staging", "..."],
+    "investigation_steps": ["Iteration 1: gathering evidence", "RAG: retrieved 3 docs..."],
+    "evidence": [{"source": "RAG:checkout-runbook.md", "content": "...", "relevance_score": 0.89}],
+    "knowledge_retrieved": ["checkout-runbook.md", "vat-handling.md"],
+    "iterations": 2,
+    "duration_ms": 4820
   },
   "error_details": null
 }
@@ -262,11 +286,50 @@ class ObservabilityEvent(BaseModel):
 
 ---
 
-## 5. Elasticsearch — Where Events Live
+## 5. Kafka Event Bus + Elasticsearch Storage
+
+**Source files:** `src/kafka/`, `src/observability/elasticsearch_client.py`
+
+### Architecture Overview
+
+AIIS uses **Kafka as the event bus** and **Elasticsearch as the storage layer**. When `KAFKA_BOOTSTRAP_SERVERS` is set, every call to `ingest_event()` publishes to the Kafka topic `aiis.observability`. A built-in Kafka consumer (the "ES-sink") reads that topic and writes to Elasticsearch with the full `payload` field. When `KAFKA_BOOTSTRAP_SERVERS` is not set (e.g., local development without Docker), events go directly to Elasticsearch as before.
+
+```mermaid
+flowchart LR
+    A[Agent\nemits event] --> B{Kafka\nconfigured?}
+    B -- Yes --> C[Publish to\naiis.observability\nKafka topic]
+    C --> D[ES-sink consumer\nreads message]
+    D --> E[Write to\nElasticsearch\nwith full payload]
+    B -- No --> E
+
+    style C fill:#fef9c3,stroke:#eab308
+    style D fill:#fef9c3,stroke:#eab308
+    style E fill:#f0fdf4,stroke:#22c55e
+```
+
+### Kafka Topic
+
+| Topic | Producer | Consumer group | Purpose |
+|---|---|---|---|
+| `aiis.observability` | All agents via `ingest_event()` | `aiis-es-sink` | Streams every observability event to Elasticsearch |
+
+### Kafka Module (`src/kafka/`)
+
+| File | Purpose |
+|---|---|
+| `topics.py` | Topic name constants |
+| `producer.py` | Singleton async producer — lazy-connects, silent on failure |
+| `consumer.py` | ES-sink consumer — reads `aiis.observability`, writes to ES |
+
+The producer uses `send_and_wait()` for at-least-once delivery. If Kafka is unreachable or slow, the producer logs a warning and `ingest_event()` falls back to direct ES ingestion automatically — agents are never blocked by Kafka unavailability.
+
+---
+
+## 5a. Elasticsearch — Where Events Live
 
 **Source file:** `src/observability/elasticsearch_client.py`
 
-Elasticsearch is a distributed search and analytics engine. AIIS uses it as the storage layer for all observability events. Events flow in from the agents and can be searched and visualized in Kibana.
+Elasticsearch is a distributed search and analytics engine. AIIS uses it as the storage layer for all observability events. Events flow in from the Kafka ES-sink consumer (or directly when Kafka is not configured) and can be searched and visualized in Kibana.
 
 ### 5.1 Index Naming Strategy
 
@@ -302,7 +365,8 @@ The `ensure_index_template()` function creates an Elasticsearch index template t
 | `duration_ms` | `integer` | Numeric aggregation (avg, max, histogram) |
 | `message` | `text` | Full-text search across message content |
 | `error_details` | `text` | Full-text search through error messages |
-| `metadata` | `object` (dynamic) | Flexible — new keys are indexed automatically |
+| `metadata` | `object` (dynamic) | Summary key-value data — brief, always populated |
+| `payload` | `object` (dynamic) | Complete request/response body — full A2A messages, MCP args/responses, RAG docs |
 
 **`keyword` vs `text`:** `keyword` stores the string exactly as-is and supports sorting/aggregation. `text` tokenizes the string for full-text search. Use `keyword` for IDs and categorical values; use `text` for human-readable messages.
 
@@ -361,17 +425,24 @@ flowchart TD
     end
 
     subgraph Events["src/observability/events.py"]
-        OE[ObservabilityEvent\nmodel_dump → JSON]
+        OE["ObservabilityEvent\nmetadata + payload\nmodel_dump → JSON"]
     end
 
     subgraph ESClient["src/observability/elasticsearch_client.py"]
-        CB{Circuit\nBreaker}
-        ING[ingest_event\nasync, fire-and-forget]
+        CB{Kafka\nconfigured?}
+        ING[ingest_event]
+        DIRECT[ingest_event_direct\nES circuit breaker]
+    end
+
+    subgraph KafkaBus["Kafka (src/kafka/)"]
+        PROD[Producer\nsend_and_wait]
+        TOPIC["Topic: aiis.observability"]
+        CONS[ES-sink Consumer\ngroup: aiis-es-sink]
     end
 
     subgraph Storage["Elasticsearch Cluster"]
-        IDX1["aiis-events-2026.07.18"]
-        IDX2["aiis-events-2026.07.17"]
+        IDX1["aiis-events-2026.07.19"]
+        IDX2["aiis-events-2026.07.18"]
         IDX3["aiis-events-..."]
     end
 
@@ -389,8 +460,13 @@ flowchart TD
     A3 -->|"emit event"| OE
     OE --> ING
     ING --> CB
-    CB -->|"reachable"| IDX1
-    CB -->|"unreachable\nsilently drop"| X([Dropped])
+    CB -->|"yes"| PROD
+    CB -->|"no / fallback"| DIRECT
+    PROD --> TOPIC
+    TOPIC --> CONS
+    CONS --> DIRECT
+    DIRECT -->|"reachable"| IDX1
+    DIRECT -->|"unreachable\nsilently drop"| X([Dropped])
     IDX1 --> DISC
     IDX2 --> DISC
     IDX3 --> DISC
@@ -399,6 +475,8 @@ flowchart TD
     style X fill:#fee2e2,stroke:#ef4444
     style IDX1 fill:#f0fdf4,stroke:#22c55e
     style DASH fill:#dbeafe,stroke:#3b82f6
+    style TOPIC fill:#fef9c3,stroke:#eab308
+    style CONS fill:#fef9c3,stroke:#eab308
 ```
 
 ---
@@ -595,20 +673,30 @@ flowchart LR
 | Environment Variable | Default | Description |
 |---|---|---|
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Full URL of the Elasticsearch cluster |
+| `KAFKA_BOOTSTRAP_SERVERS` | _(empty)_ | Kafka broker(s). When set, events flow via Kafka. When empty, events go directly to ES |
 
-**Example `.env`:**
+**Local development (no Kafka):**
 
 ```bash
 ELASTICSEARCH_URL=http://localhost:9200
+# Leave KAFKA_BOOTSTRAP_SERVERS empty — direct ES writes
 ```
 
-For production or cloud-hosted Elasticsearch (Elastic Cloud, AWS OpenSearch):
+**Docker Compose (Kafka + ES):**
+
+```bash
+ELASTICSEARCH_URL=http://elasticsearch:9200
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+```
+
+**Production / cloud:**
 
 ```bash
 ELASTICSEARCH_URL=https://your-cluster.es.io:443
+KAFKA_BOOTSTRAP_SERVERS=kafka-broker-1:9092,kafka-broker-2:9092
 ```
 
-If the `elasticsearch` Python package is not installed, the client silently does nothing — Elasticsearch is fully optional.
+If the `elasticsearch` Python package is not installed, the client silently does nothing. If Kafka is configured but unreachable, `ingest_event()` automatically falls back to direct ES writes with no agent impact.
 
 ---
 

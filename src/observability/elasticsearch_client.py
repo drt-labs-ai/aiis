@@ -44,7 +44,8 @@ def _index_name() -> str:
     return f"{INDEX_PREFIX}-{date}"
 
 
-async def ingest_event(event: ObservabilityEvent) -> None:
+async def ingest_event_direct(event: ObservabilityEvent) -> None:
+    """Write an event directly to Elasticsearch (used by the Kafka ES-sink consumer)."""
     global _es_reachable
     client = await _get_client()
     if client is None:
@@ -57,6 +58,15 @@ async def ingest_event(event: ObservabilityEvent) -> None:
     except Exception as exc:
         _es_reachable = False
         logger.debug("ES ingest failed (events will be silently dropped): %s", exc)
+
+
+async def ingest_event(event: ObservabilityEvent) -> None:
+    """Publish event to Kafka (preferred) or write directly to ES (fallback)."""
+    from src.kafka.producer import publish
+    from src.kafka.topics import OBSERVABILITY
+    published = await publish(OBSERVABILITY, event.model_dump(mode="json"))
+    if not published:
+        await ingest_event_direct(event)
 
 
 async def ensure_index_template() -> None:
@@ -82,6 +92,7 @@ async def ensure_index_template() -> None:
                     "message": {"type": "text"},
                     "error_details": {"type": "text"},
                     "metadata": {"type": "object", "dynamic": True},
+                    "payload": {"type": "object", "dynamic": True},
                 }
             }
         },

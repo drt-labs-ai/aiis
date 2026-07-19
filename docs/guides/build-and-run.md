@@ -131,13 +131,17 @@ uv run uvicorn src.api.webhook:app --host 0.0.0.0 --port 8000 --workers 1
 
 ## Running Docker Services
 
-### Starting Elasticsearch and Kibana
+### Starting All Services (Elasticsearch, Kibana, Kafka)
 
 ```bash
 docker compose up -d
 ```
 
 The `-d` flag runs containers in the background (detached mode). Your terminal remains usable.
+
+Docker Compose starts three services: Elasticsearch, Kibana, and Kafka. AIIS's API server uses Kafka as the event bus when `KAFKA_BOOTSTRAP_SERVERS` is set (it is pre-configured in `docker-compose.yml` as `kafka:9092`).
+
+For local development **without Docker**, leave `KAFKA_BOOTSTRAP_SERVERS` empty — events go directly to Elasticsearch.
 
 ### Viewing Logs
 
@@ -150,7 +154,10 @@ docker compose logs -f elasticsearch
 # Kibana logs
 docker compose logs -f kibana
 
-# Both at once
+# Kafka logs
+docker compose logs -f kafka
+
+# All at once
 docker compose logs -f
 ```
 
@@ -166,7 +173,7 @@ docker compose down
 docker compose down -v
 ```
 
-> **When to use `docker compose down -v`:** If Elasticsearch is in a bad state, or you want to start completely fresh. Note that this deletes all indexed events — Kibana dashboards will be empty again.
+> **When to use `docker compose down -v`:** If Elasticsearch or Kafka is in a bad state, or you want to start completely fresh. This deletes all indexed events and Kafka topic offsets.
 
 ### Checking Container Status
 
@@ -180,11 +187,14 @@ Expected output when everything is running:
 CONTAINER ID   IMAGE                  PORTS                    NAMES
 a1b2c3d4e5f6   elasticsearch:8.15.0   0.0.0.0:9200->9200/tcp   aiis-elasticsearch
 b2c3d4e5f6a1   kibana:8.15.0          0.0.0.0:5601->5601/tcp   aiis-kibana
+c3d4e5f6a1b2   bitnami/kafka:3.7      0.0.0.0:9092->9092/tcp   aiis-kafka
 ```
 
 ### Docker Compose Services Explained
 
-AIIS's `docker-compose.yml` defines two services:
+AIIS's `docker-compose.yml` defines three core services:
+
+**`aiis-kafka`** — Event bus (Bitnami Kafka 3.7, KRaft mode — no Zookeeper required). All observability events are published here and consumed by the built-in ES-sink consumer that writes them to Elasticsearch with full payload bodies. Port `9092`.
 
 **`aiis-elasticsearch`**
 
