@@ -104,7 +104,7 @@ class TestFullWorkflow:
              patch("src.agents.supervisor.agent._llm_classify", new_callable=AsyncMock, return_value=None), \
              patch("src.mcp_server.tools.github_tools.add_comment", new_callable=AsyncMock, return_value={"mock": True}), \
              patch("src.workflow.graph.add_comment", new_callable=AsyncMock, return_value={"mock": True}), \
-             patch("src.observability.elasticsearch_client.ingest_event", new_callable=AsyncMock):
+             patch("src.kafka.producer.publish", new_callable=AsyncMock, return_value=True) as mock_publish:
 
             raw = await workflow.ainvoke(state)
 
@@ -114,6 +114,8 @@ class TestFullWorkflow:
         assert final.assigned_domain == Domain.PRE_PURCHASE
         assert final.investigation_result is not None
         assert final.investigation_result.confidence > 0
+        # All observability events must flow through Kafka — no direct ES path
+        assert mock_publish.called, "Expected all ingest_event() calls to go through Kafka producer"
 
     @pytest.mark.asyncio
     async def test_full_workflow_post_purchase(self):
@@ -132,10 +134,11 @@ class TestFullWorkflow:
              patch("src.agents.supervisor.agent.assign_issue", new_callable=AsyncMock), \
              patch("src.agents.supervisor.agent._llm_classify", new_callable=AsyncMock, return_value=None), \
              patch("src.workflow.graph.add_comment", new_callable=AsyncMock, return_value={"mock": True}), \
-             patch("src.observability.elasticsearch_client.ingest_event", new_callable=AsyncMock):
+             patch("src.kafka.producer.publish", new_callable=AsyncMock, return_value=True) as mock_publish:
 
             raw = await workflow.ainvoke(state)
 
         final = WorkflowState.model_validate(raw) if isinstance(raw, dict) else raw
         assert final.completed is True
         assert final.assigned_domain == Domain.POST_PURCHASE
+        assert mock_publish.called, "Expected all ingest_event() calls to go through Kafka producer"

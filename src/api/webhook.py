@@ -18,6 +18,7 @@ from src.agents.domain import create_pre_purchase_agent, create_post_purchase_ag
 from src.observability.logger import configure_logging
 from src.observability.elasticsearch_client import ensure_index_template
 from src.kafka.consumer import start_consumer as start_kafka_consumer
+from src.kafka.producer import close_producer as close_kafka_producer
 from src.rag.indexer import index_knowledge_base
 from src.workflow.graph import get_workflow
 
@@ -50,6 +51,12 @@ async def startup():
         logger.warning(f"Knowledge base indexing failed (non-fatal): {exc}")
     _initialized = True
     logger.info("AIIS startup complete")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await close_kafka_producer()
+    logger.info("AIIS shutdown complete")
 
 
 class GitHubIssuePayload(BaseModel):

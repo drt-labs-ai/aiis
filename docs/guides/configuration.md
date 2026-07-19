@@ -4,21 +4,8 @@ This document is the complete reference for every environment variable AIIS supp
 
 ---
 
-## How Configuration Works
-
-AIIS uses Python's `python-dotenv` library to load `.env` into environment variables at startup. The `.env` file is never committed to version control (it is in `.gitignore`) — each developer maintains their own.
-
-To get started:
-
 ```bash
 cp .env.example .env
-# Edit .env with your values
-```
-
-Environment variables can also be set directly in your shell — shell values override `.env` values:
-
-```bash
-LOG_LEVEL=DEBUG uv run uvicorn src.api.webhook:app --reload
 ```
 
 ---
@@ -81,8 +68,6 @@ Provider and model used by domain investigation agents (pre-purchase, post-purch
 | **Default** | _(empty)_ |
 | **Required** | When any agent uses `provider=anthropic` |
 | **Example** | `sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
-
-Anthropic API key. Get yours at [console.anthropic.com](https://console.anthropic.com).
 
 ---
 
@@ -485,63 +470,6 @@ DOMAIN_AGENT_LLM_PROVIDER=ollama
 DOMAIN_AGENT_LLM_MODEL=qwen2.5:14b
 OLLAMA_BASE_URL=http://localhost:11434
 ```
-
----
-
-## Tuning Investigation Quality
-
-The two agent tuning variables give you direct control over the quality-versus-speed trade-off.
-
-```mermaid
-quadrantChart
-    title Investigation Quality vs Speed
-    x-axis Fast --> Slow
-    y-axis Low Quality --> High Quality
-    quadrant-1 High Quality, Slow
-    quadrant-2 High Quality, Fast
-    quadrant-3 Low Quality, Fast
-    quadrant-4 Low Quality, Slow
-    CONFIDENCE_THRESHOLD=0.5 MAX_ITER=2: [0.15, 0.25]
-    Default 0.75 / 4 iterations: [0.45, 0.55]
-    CONFIDENCE_THRESHOLD=0.9 MAX_ITER=4: [0.65, 0.75]
-    CONFIDENCE_THRESHOLD=0.9 MAX_ITER=8: [0.85, 0.85]
-```
-
-### Tuning Recommendations
-
-**For fastest response time** — Reduce both settings:
-
-```bash
-MAX_INVESTIGATION_ITERATIONS=2
-CONFIDENCE_THRESHOLD=0.5
-```
-
-The agent will stop as soon as it has a plausible answer. Good for high-volume, low-stakes scenarios.
-
----
-
-**For most thorough investigation** — Increase both settings:
-
-```bash
-MAX_INVESTIGATION_ITERATIONS=6
-CONFIDENCE_THRESHOLD=0.9
-```
-
-The agent runs more cycles and only stops when it is very confident. Good for critical production issues where thoroughness matters more than speed.
-
----
-
-**For improving RAG quality** — Improve the knowledge base:
-
-The single biggest lever for improving investigation quality is **the quality of your knowledge base documents**. The LLM and RAG settings are secondary.
-
-High-quality knowledge base documents:
-- Describe specific failure modes and their root causes
-- Include past incident post-mortems with timeline and resolution
-- Explain service dependencies and common failure patterns
-- Reference specific service names, queue names, and job names that appear in issue descriptions
-
-Low-quality documents (vague architecture overviews) produce generic, low-confidence results regardless of LLM or iteration settings.
 
 ---
 

@@ -6,25 +6,6 @@ This guide covers everything you need for daily development with AIIS: managing 
 
 ## Python Environment with uv
 
-### What Is uv?
-
-`uv` is a blazing-fast Python package manager written in Rust. It replaces a confusing combination of tools you might have used before:
-
-| Old Way | uv Equivalent |
-|---|---|
-| `pip install` | `uv add` |
-| `pip install -r requirements.txt` | `uv sync` |
-| `virtualenv .venv` + `source .venv/bin/activate` | `uv sync` (creates `.venv` automatically) |
-| `poetry install` | `uv sync` |
-| `python -m venv` | built into `uv` |
-
-### Why uv?
-
-- **10–100x faster than pip** — dependency resolution and package downloads happen in parallel
-- **Lock file support** — `uv.lock` pins exact versions so every developer gets the same environment
-- **No manual virtual environment management** — `uv` creates and manages `.venv` for you
-- **Single tool** — replaces pip, pip-tools, virtualenv, pyenv (for version management), and poetry
-
 ### Installing Dependencies
 
 Run this once after cloning, and again whenever `pyproject.toml` changes (e.g., after `git pull`):
@@ -67,21 +48,6 @@ uv run python -m pytest
 
 # Run any installed CLI tool
 uv run uvicorn src.api.webhook:app --reload
-```
-
-### Activating the Virtual Environment Manually
-
-If you prefer to work in an activated shell (so you can just type `python` or `pytest` directly):
-
-```bash
-# macOS / Linux
-source .venv/bin/activate
-
-# Windows
-.venv\Scripts\activate
-
-# To deactivate when done
-deactivate
 ```
 
 ---
@@ -192,28 +158,9 @@ c3d4e5f6a1b2   bitnami/kafka:3.7      0.0.0.0:9092->9092/tcp   aiis-kafka
 
 ### Docker Compose Services Explained
 
-AIIS's `docker-compose.yml` defines three core services:
-
-**`aiis-kafka`** — Event bus (Bitnami Kafka 3.7, KRaft mode — no Zookeeper required). All observability events are published here and consumed by the built-in ES-sink consumer that writes them to Elasticsearch with full payload bodies. Port `9092`.
-
-**`aiis-elasticsearch`**
-
-| Setting | Value | Why |
-|---|---|---|
-| Image | `elasticsearch:8.15.0` | Pinned version for reproducibility |
-| Port | `9200` | Standard Elasticsearch HTTP port |
-| Mode | Single-node | Simpler setup for local dev (no cluster needed) |
-| Security | Disabled | Removes TLS/auth for easy local access |
-| Heap | 512 MB | Enough for development; increase for production |
-| Data volume | `esdata` | Persists data across container restarts |
-
-**`aiis-kibana`**
-
-| Setting | Value | Why |
-|---|---|---|
-| Image | `kibana:8.15.0` | Must match Elasticsearch version |
-| Port | `5601` | Standard Kibana HTTP port |
-| Dependency | `elasticsearch` | Waits for ES to be healthy before starting |
+- **kafka** — Confluent Kafka 7.6 (KRaft), port 9092. Mandatory event bus.
+- **elasticsearch** — Elastic 8.15, port 9200. Event storage written by the Kafka ES-sink consumer.
+- **kibana** — Elastic Kibana 8.15, port 5601. Dashboard UI for querying events.
 
 ---
 
@@ -435,50 +382,6 @@ The investigation runs asynchronously in the server — watch the server termina
 
 ### Sample Request and Response
 
-The simulator sends the following HTTP request structure to `POST /webhook/github`:
-
-**Request headers:**
-
-```
-POST /webhook/github HTTP/1.1
-Host: localhost:8000
-Content-Type: application/json
-X-GitHub-Event: issues
-X-Hub-Signature-256: sha256=a3f9c2d14e567890abcdef1234567890abcdef1234567890abcdef1234567890
-X-GitHub-Delivery: simulate-1750000000
-User-Agent: GitHub-Hookshot/simulate
-```
-
-**Request body (GitHub `issues` payload):**
-
-```json
-{
-  "action": "opened",
-  "issue": {
-    "number": 101,
-    "title": "Search returns no results for 'Electronics' category",
-    "body": "When users search for 'Electronics' or any sub-category, the PLP returns an empty results page...",
-    "state": "open",
-    "created_at": "2026-07-19T08:00:00+00:00",
-    "updated_at": "2026-07-19T08:00:00+00:00",
-    "labels": [],
-    "assignees": [],
-    "user": {
-      "login": "simulate-webhook-script",
-      "type": "User"
-    },
-    "html_url": "https://github.com/your-org/your-repo/issues/101"
-  },
-  "repository": {
-    "full_name": "your-org/your-repo",
-    "name": "your-repo",
-    "owner": { "login": "your-org" },
-    "private": false
-  },
-  "sender": { "login": "simulate-webhook-script" }
-}
-```
-
 **Response (HTTP 200):**
 
 ```json
@@ -496,52 +399,6 @@ The response returns immediately — `workflow_id` is the ID to use when queryin
 ```json
 { "status": "ignored", "action": "closed" }
 ```
-
----
-
-### Equivalent curl Command
-
-If you prefer `curl` over the Python script:
-
-```bash
-# Build and sign the payload manually
-SECRET="your-webhook-secret"   # must match GITHUB_WEBHOOK_SECRET in .env
-PAYLOAD='{
-  "action": "opened",
-  "issue": {
-    "number": 42,
-    "title": "Payment gateway timeout during checkout",
-    "body": "Customers are getting 504s when clicking Pay Now.",
-    "state": "open",
-    "labels": [],
-    "assignees": [],
-    "user": {"login": "dev", "type": "User"}
-  },
-  "repository": {"full_name": "your-org/your-repo", "name": "your-repo", "owner": {"login": "your-org"}, "private": false},
-  "sender": {"login": "dev"}
-}'
-
-SIG="sha256=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')"
-
-curl -s -X POST http://localhost:8000/webhook/github \
-  -H "Content-Type: application/json" \
-  -H "X-GitHub-Event: issues" \
-  -H "X-Hub-Signature-256: $SIG" \
-  -H "X-GitHub-Delivery: curl-test-001" \
-  -d "$PAYLOAD" | python3 -m json.tool
-```
-
-Expected curl output:
-
-```json
-{
-  "status": "accepted",
-  "workflow_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "issue_id": 42
-}
-```
-
-> **No secret configured?** Leave `SECRET=""` and omit the `X-Hub-Signature-256` header — the server accepts unsigned requests when `GITHUB_WEBHOOK_SECRET` is not set in `.env`.
 
 ---
 
@@ -567,33 +424,6 @@ curl -s "http://localhost:9200/aiis-events-*/_search" \
   -d '{"query": {"term": {"workflow_id": "3e7f1a2b-9c4d-4e5f-8a6b-1c2d3e4f5a6b"}}, "size": 50}' \
   | python3 -m json.tool
 ```
-
----
-
-### How the Simulator Works
-
-```mermaid
-sequenceDiagram
-    participant Sim as simulate_webhook.py
-    participant AIIS as AIIS Server (localhost:8000)
-    participant Sup as Supervisor Agent
-    participant Dom as Domain Agent
-    participant GH as GitHub API
-
-    Sim->>Sim: Build GitHub issues payload
-    Sim->>Sim: Sign with HMAC-SHA256
-    Sim->>AIIS: POST /webhook/github
-    AIIS->>AIIS: Verify signature
-    AIIS-->>Sim: 200 {"status":"accepted","workflow_id":"..."}
-    AIIS->>Sup: Dispatch async workflow
-    Sup->>Sup: LLM domain classification
-    Sup->>Dom: InvestigationRequest via A2A
-    Dom->>Dom: RAG search + MCP tool calls
-    Dom-->>Sup: InvestigationResult
-    Sup->>GH: POST comment on issue
-```
-
-The script builds the same JSON payload structure that GitHub sends, adds the `X-GitHub-Event: issues` and `X-Hub-Signature-256` headers, and POSTs to the local server. The server cannot distinguish this from a real GitHub delivery.
 
 ---
 
@@ -686,50 +516,3 @@ This starts three containers: Elasticsearch, Kibana, and AIIS API.
 
 > **For local development**, running the API server directly with `uv run uvicorn` (not in Docker) is much more convenient because `--reload` gives you instant code-change restarts. Use the Docker build for staging or production deployments.
 
----
-
-## Environment Variable Summary
-
-All AIIS configuration is done through environment variables in the `.env` file.
-
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `ANTHROPIC_API_KEY` | _(empty)_ | No | Anthropic Claude API key. If set, overrides Ollama. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | No | URL for the local Ollama server. |
-| `OLLAMA_MODEL` | `llama3.1:8b` | No | Model name to use with Ollama. |
-| `GITHUB_TOKEN` | _(empty)_ | For webhook | GitHub personal access token with `issues:write`. |
-| `GITHUB_REPO` | _(empty)_ | For webhook | Target repo in `owner/repo` format. |
-| `GITHUB_WEBHOOK_SECRET` | _(empty)_ | Recommended | HMAC secret shared with GitHub for payload verification. |
-| `ELASTICSEARCH_URL` | `http://localhost:9200` | No | Elasticsearch endpoint. AIIS works without it. |
-| `CHROMA_PERSIST_DIR` | `./data/chroma` | No | Directory where ChromaDB stores its vector index. |
-| `EMBED_MODEL` | `all-MiniLM-L6-v2` | No | Sentence transformer model for RAG embeddings. |
-| `KNOWLEDGE_BASE_DIR` | `./knowledge-base` | No | Path to the Markdown knowledge base files. |
-| `MAX_INVESTIGATION_ITERATIONS` | `4` | No | Max RAG+tool cycles per investigation. |
-| `CONFIDENCE_THRESHOLD` | `0.75` | No | Confidence score at which investigation stops early. |
-| `LOG_LEVEL` | `INFO` | No | Python log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
-
----
-
-## Build and Run Flow Overview
-
-```mermaid
-flowchart TD
-    A([Start]) --> B[uv sync\nInstall dependencies]
-    B --> C[docker compose up -d\nStart ES + Kibana]
-    C --> D[uv run python scripts/index_kb.py\nIndex knowledge base]
-    D --> E{How do you want\nto run AIIS?}
-
-    E -->|Development| F[uv run uvicorn ... --reload\nAuto-restarts on code change]
-    E -->|Production| G[uv run uvicorn ... --workers 1\nStable, no auto-restart]
-    E -->|Full Docker| H[docker build + docker compose --profile full up]
-
-    F --> I([AIIS ready at localhost:8000])
-    G --> I
-    H --> I
-
-    I --> J{How do you\nwant to test?}
-    J -->|Quick smoke test| K[uv run python scripts/simulate_issue.py]
-    J -->|Manual curl| L[curl -X POST localhost:8000/investigate]
-    J -->|Simulate GitHub webhook| M[uv run python scripts/simulate_webhook.py]
-    J -->|Run test suite| N[uv run pytest -v]
-```

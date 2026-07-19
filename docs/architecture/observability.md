@@ -6,79 +6,35 @@
 
 ## Table of Contents
 
-1. [What is Observability and Why Does it Matter for AI Agents?](#1-what-is-observability-and-why-does-it-matter-for-ai-agents)
-2. [The Three Pillars of Observability](#2-the-three-pillars-of-observability)
-3. [Distributed Tracing — Following a Request Through the System](#3-distributed-tracing--following-a-request-through-the-system)
-   - [TraceContext](#31-tracecontext)
-   - [Spans and Parent-Child Relationships](#32-spans-and-parent-child-relationships)
-   - [ContextVar — Passing Context Without Threading Headaches](#33-contextvar--passing-context-without-threading-headaches)
-   - [Helper Functions](#34-helper-functions)
-4. [Events — What Actually Gets Recorded](#4-events--what-actually-gets-recorded)
-   - [Event Types Reference](#41-event-types-reference)
-   - [ObservabilityEvent Model](#42-observabilityevent-model)
-5. [Elasticsearch — Where Events Live](#5-elasticsearch--where-events-live)
-   - [Index Naming Strategy](#51-index-naming-strategy)
-   - [Field Mappings](#52-field-mappings)
-   - [The Circuit Breaker](#53-the-circuit-breaker)
-   - [Fire-and-Forget Ingestion](#54-fire-and-forget-ingestion)
-6. [Observability Flow Diagram](#6-observability-flow-diagram)
-7. [A Typical Workflow — Event Timeline](#7-a-typical-workflow--event-timeline)
-8. [Kibana Dashboards](#8-kibana-dashboards)
-   - [Setup](#81-setup)
-   - [Viewing a Trace in Kibana Discover](#82-viewing-a-trace-in-kibana-discover)
-9. [Configuration Reference](#9-configuration-reference)
-10. [Troubleshooting](#10-troubleshooting)
+1. [Distributed Tracing — Following a Request Through the System](#1-distributed-tracing--following-a-request-through-the-system)
+   - [TraceContext](#11-tracecontext)
+   - [Spans and Parent-Child Relationships](#12-spans-and-parent-child-relationships)
+   - [ContextVar](#13-contextvar)
+   - [Helper Functions](#14-helper-functions)
+2. [Events — What Actually Gets Recorded](#2-events--what-actually-gets-recorded)
+   - [Event Types Reference](#21-event-types-reference)
+   - [ObservabilityEvent Model](#22-observabilityevent-model)
+3. [Kafka Event Bus + Elasticsearch Storage](#3-kafka-event-bus--elasticsearch-storage)
+   - [Index Naming Strategy](#31-index-naming-strategy)
+   - [Field Mappings](#32-field-mappings)
+   - [The Circuit Breaker](#33-the-circuit-breaker)
+   - [Fire-and-Forget Ingestion](#34-fire-and-forget-ingestion)
+4. [Observability Flow Diagram](#4-observability-flow-diagram)
+5. [A Typical Workflow — Event Timeline](#5-a-typical-workflow--event-timeline)
+6. [Kibana Dashboards](#6-kibana-dashboards)
+   - [Setup](#61-setup)
+   - [Available Dashboards](#62-available-dashboards)
+   - [Viewing a Trace in Kibana Discover](#63-viewing-a-trace-in-kibana-discover)
+7. [Configuration Reference](#7-configuration-reference)
+8. [Troubleshooting](#8-troubleshooting)
 
 ---
 
-## 1. What is Observability and Why Does it Matter for AI Agents?
-
-### The Basic Idea
-
-When something goes wrong in a traditional web application, you look at server logs or a dashboard and usually pinpoint the problem quickly. But **multi-agent AI systems** are much harder to debug:
-
-- Multiple agents run concurrently and independently
-- Each agent makes external calls (to GitHub, to an LLM, to tools)
-- A single user request might trigger dozens of internal operations
-- Failures can be silent (an agent returns a degraded result without crashing)
-
-**Observability** is the engineering discipline that gives you visibility into what a system is actually doing, based on the data it produces. If a system is *observable*, you can answer questions like:
-
-- Which agent handled GitHub issue #456?
-- How long did the RAG search take?
-- Did the MCP tool call fail? Why?
-- What was the supervisor's routing decision?
-- How many retries happened before success?
-
-### AIIS Without Observability
-
-Imagine debugging this scenario without observability:
-
-> "The triage for issue #456 posted a wrong label to GitHub. Something went wrong."
-
-Without traces, you have no idea which agent decided on the label, what context it had, or whether it failed and retried. With AIIS's observability stack, you can filter by the issue's `trace_id` in Kibana and see every event in chronological order.
-
----
-
-## 2. The Three Pillars of Observability
-
-Observability is traditionally built on three types of telemetry:
-
-| Pillar | What it is | AIIS Implementation |
-|---|---|---|
-| **Logs** | Free-text messages about what happened | Python `logging` module (console output) |
-| **Metrics** | Numeric measurements over time (counts, durations, rates) | `duration_ms` field on every event; aggregatable in Kibana |
-| **Traces** | A tree of operations representing a single end-to-end request | `TraceContext` with `trace_id`, `span_id`, `parent_span_id` |
-
-AIIS combines all three into a single structured **event** that is shipped to Elasticsearch. Each event has log-like message fields, metric-like `duration_ms`, and trace-like `trace_id`/`span_id` identifiers. This means a single query in Kibana can answer all three types of questions at once.
-
----
-
-## 3. Distributed Tracing — Following a Request Through the System
+## 1. Distributed Tracing — Following a Request Through the System
 
 **Source file:** `src/observability/tracer.py`
 
-### 3.1 TraceContext
+### 1.1 TraceContext
 
 `TraceContext` is a small data object that holds the current position in a distributed trace. Every operation in AIIS runs within a `TraceContext`:
 
@@ -93,7 +49,7 @@ class TraceContext:
 
 All four values are UUID strings, generated automatically if not provided.
 
-### 3.2 Spans and Parent-Child Relationships
+### 1.2 Spans and Parent-Child Relationships
 
 A **span** represents one unit of work — for example, a single MCP tool call or a single RAG search. Spans are arranged in a tree using `parent_span_id`.
 
@@ -137,21 +93,13 @@ child_ctx = parent_ctx.child_span()
 # child_ctx.parent_span_id == parent_ctx.span_id
 ```
 
-### 3.3 ContextVar — Passing Context Without Threading Headaches
-
-AIIS is an async Python application (using `asyncio`). Traditional approaches like global variables or function parameters break down in async code because multiple coroutines run concurrently.
-
-Python's `ContextVar` solves this:
+### 1.3 ContextVar
 
 ```python
 _current_trace: ContextVar[TraceContext | None] = ContextVar("_current_trace", default=None)
 ```
 
-A `ContextVar` is like a variable that automatically has a **separate value for each concurrent async task**, similar to how thread-local storage works for threads. When an async task reads `_current_trace`, it gets the value that was set in its own context, not a value set by another concurrently running task.
-
-Think of it as a sticky note attached to each coroutine's "thread of execution" — other coroutines cannot see or modify your sticky note.
-
-### 3.4 Helper Functions
+### 1.4 Helper Functions
 
 | Function | What it does |
 |---|---|
@@ -161,11 +109,11 @@ Think of it as a sticky note attached to each coroutine's "thread of execution" 
 
 ---
 
-## 4. Events — What Actually Gets Recorded
+## 2. Events — What Actually Gets Recorded
 
 **Source file:** `src/observability/events.py`
 
-### 4.1 Event Types Reference
+### 2.1 Event Types Reference
 
 AIIS defines 19 event types that together tell the complete story of a workflow:
 
@@ -214,7 +162,7 @@ mindmap
 | GitHub Actions | GITHUB_UPDATED, GITHUB_ASSIGNED | Records changes made back to the GitHub issue |
 | Errors and Retries | ERROR, RETRY | Captures failures and automatic retry attempts |
 
-### 4.2 ObservabilityEvent Model
+### 2.2 ObservabilityEvent Model
 
 Every event stored in Elasticsearch has this structure:
 
@@ -286,7 +234,7 @@ The `payload` field carries the **complete request and response body** for each 
 
 ---
 
-## 5. Kafka Event Bus + Elasticsearch Storage
+## 3. Kafka Event Bus + Elasticsearch Storage
 
 **Source files:** `src/kafka/`, `src/observability/elasticsearch_client.py`
 
@@ -326,13 +274,13 @@ The producer uses `send_and_wait()` for at-least-once delivery. If Kafka is unre
 
 ---
 
-## 5a. Elasticsearch — Where Events Live
+## 3a. Elasticsearch — Where Events Live
 
 **Source file:** `src/observability/elasticsearch_client.py`
 
 Elasticsearch is a distributed search and analytics engine. AIIS uses it as the storage layer for all observability events. Events flow in from the Kafka ES-sink consumer (or directly when Kafka is not configured) and can be searched and visualized in Kibana.
 
-### 5.1 Index Naming Strategy
+### 3.1 Index Naming Strategy
 
 AIIS writes to **daily rolling indices** with the pattern `aiis-events-YYYY.MM.DD`:
 
@@ -348,30 +296,28 @@ AIIS writes to **daily rolling indices** with the pattern `aiis-events-YYYY.MM.D
 - Kibana can query a range of dates by querying multiple indices via the `aiis-events-*` wildcard pattern
 - Keeps individual indices from growing too large
 
-### 5.2 Field Mappings
+### 3.2 Field Mappings
 
 The `ensure_index_template()` function creates an Elasticsearch index template that pre-defines how each field is stored. Without a template, Elasticsearch guesses field types and can make poor choices (e.g., treating a UUID string as full-text when it should be a keyword for exact matching).
 
-| Field | Elasticsearch Type | Why this type |
-|---|---|---|
-| `timestamp` | `date` | Enables time-range queries and sorting by time |
-| `trace_id` | `keyword` | Exact-match search — you search for an exact UUID |
-| `span_id` | `keyword` | Same as trace_id |
-| `parent_span_id` | `keyword` | Same |
-| `workflow_id` | `keyword` | Same |
-| `issue_id` | `integer` | Numeric filtering (`issue_id: 456`) |
-| `agent` | `keyword` | Exact-match on agent name |
-| `event_type` | `keyword` | Exact-match on event type enum value |
-| `status` | `keyword` | Exact-match on "SUCCESS" / "FAILURE" |
-| `duration_ms` | `integer` | Numeric aggregation (avg, max, histogram) |
-| `message` | `text` | Full-text search across message content |
-| `error_details` | `text` | Full-text search through error messages |
-| `metadata` | `object` (dynamic) | Summary key-value data — brief, always populated |
-| `payload` | `object` (dynamic) | Complete request/response body — full A2A messages, MCP args/responses, RAG docs |
+| Field | Elasticsearch Type |
+|---|---|
+| `timestamp` | `date` |
+| `trace_id` | `keyword` |
+| `span_id` | `keyword` |
+| `parent_span_id` | `keyword` |
+| `workflow_id` | `keyword` |
+| `issue_id` | `integer` |
+| `agent` | `keyword` |
+| `event_type` | `keyword` |
+| `status` | `keyword` |
+| `duration_ms` | `integer` |
+| `message` | `text` |
+| `error_details` | `text` |
+| `metadata` | `object` (dynamic) |
+| `payload` | `object` (dynamic) |
 
-**`keyword` vs `text`:** `keyword` stores the string exactly as-is and supports sorting/aggregation. `text` tokenizes the string for full-text search. Use `keyword` for IDs and categorical values; use `text` for human-readable messages.
-
-### 5.3 The Circuit Breaker
+### 3.3 The Circuit Breaker
 
 AIIS agents must never hang waiting for Elasticsearch. If Elasticsearch is down or slow, the agents must continue working normally and simply drop observability events.
 
@@ -389,7 +335,7 @@ The client is configured to fail fast:
 
 When an ingestion call fails, `_es_reachable` is set to `False` and all subsequent calls short-circuit immediately, adding essentially zero overhead to agent operations.
 
-### 5.4 Fire-and-Forget Ingestion
+### 3.4 Fire-and-Forget Ingestion
 
 The `ingest_event()` function is `async` but agents do not `await` its result in a way that blocks the main workflow. Any exception inside `ingest_event()` is caught and logged at `DEBUG` level — never re-raised. This design ensures that an Elasticsearch outage cannot cause an agent to crash or slow down.
 
@@ -409,7 +355,7 @@ flowchart LR
 
 ---
 
-## 6. Observability Flow Diagram
+## 4. Observability Flow Diagram
 
 This diagram shows the full path from agent code emitting an event to a developer viewing it in Kibana.
 
@@ -479,7 +425,7 @@ flowchart TD
 
 ---
 
-## 7. A Typical Workflow — Event Timeline
+## 5. A Typical Workflow — Event Timeline
 
 When GitHub issue #456 arrives, the following events are emitted in sequence. All share the same `trace_id`.
 
@@ -528,9 +474,9 @@ This sequence produces approximately 12–20 events in Elasticsearch for a singl
 
 ---
 
-## 8. Kibana Dashboards
+## 6. Kibana Dashboards
 
-### 8.1 Setup
+### 6.1 Setup
 
 Dashboards are created via the Kibana REST API using a Python script:
 
@@ -553,7 +499,7 @@ uv run python scripts/create_kibana_dashboards.py
 
 The script creates a Kibana data view (`aiis-events-*`) and two complete dashboards containing **32 panels** total — no manual import required.
 
-### 8.2 Available Dashboards
+### 6.2 Available Dashboards
 
 #### AIIS — Issue Status
 `http://localhost:5601/app/dashboards#/view/aiis-issue-status-dashboard`
@@ -617,31 +563,7 @@ flowchart LR
     style F fill:#f0fdf4,stroke:#22c55e
 ```
 
-### 8.3 Viewing a Trace in Kibana Discover
-
-To follow a specific GitHub issue through the system:
-
-```mermaid
-flowchart LR
-    A([Open Kibana\nlocalhost:5601]) --> B[Go to Discover]
-    B --> C[Select index pattern\naiis-events-*]
-    C --> D["Add filter:\ntrace_id is\nabc-123-your-uuid"]
-    D --> E[Sort by timestamp\nascending]
-    E --> F([See all events for\nthis issue in order])
-
-    style A fill:#dbeafe,stroke:#3b82f6
-    style F fill:#f0fdf4,stroke:#22c55e
-```
-
-**Step-by-step:**
-
-1. Open Kibana at `http://localhost:5601`
-2. Click **Discover** in the left sidebar
-3. In the index pattern dropdown (top left), select **aiis-events-\***
-4. Set the time range to cover when the issue was processed
-5. In the search bar, type: `trace_id: "your-trace-id-here"`
-6. Click **Add filter** → field: `trace_id` → operator: `is` → value: the UUID
-7. Sort the table by `timestamp` ascending to see events in order
+### 6.3 Viewing a Trace in Kibana Discover
 
 **Useful Kibana queries:**
 
@@ -666,7 +588,7 @@ flowchart LR
 
 ---
 
-## 9. Configuration Reference
+## 7. Configuration Reference
 
 | Environment Variable | Default | Description |
 |---|---|---|
@@ -698,7 +620,7 @@ If Kafka is unreachable, `ingest_event()` logs a WARNING and drops the event —
 
 ---
 
-## 10. Troubleshooting
+## 8. Troubleshooting
 
 ### "ES unavailable; event dropped" in logs
 
