@@ -1,4 +1,4 @@
-"""Async Kafka producer — singleton, lazy-connect, silent on unavailability."""
+"""Async Kafka producer — singleton, lazy-connect, retries on each call after failure."""
 from __future__ import annotations
 import json
 import logging
@@ -8,7 +8,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _producer = None
-_kafka_available: bool | None = None  # None=untried, True=up, False=down
 
 
 def _bootstrap_servers() -> str:
@@ -16,15 +15,19 @@ def _bootstrap_servers() -> str:
 
 
 async def get_producer():
-    global _producer, _kafka_available
-    if _kafka_available is False:
-        return None
+    """Return the singleton Kafka producer, connecting if not yet connected.
+
+    Unlike the old implementation, a previous connection failure does NOT
+    permanently disable Kafka — each call attempts to reconnect so that a
+    transient Kafka unavailability at startup does not silently kill all
+    observability for the lifetime of the process.
+    """
+    global _producer
     if _producer is not None:
         return _producer
 
     servers = _bootstrap_servers()
     if not servers:
-        _kafka_available = False
         return None
 
     try:
@@ -36,12 +39,11 @@ async def get_producer():
         )
         await p.start()
         _producer = p
-        _kafka_available = True
         logger.info("Kafka producer connected to %s", servers)
         return _producer
     except Exception as exc:
-        _kafka_available = False
-        logger.warning("Kafka unavailable (%s); observability events go directly to ES", exc)
+        # Do NOT set a permanent failure flag — the next publish call will retry.
+        logger.warning("Kafka unavailable (%s); event will be dropped", exc)
         return None
 
 
@@ -54,6 +56,10 @@ async def publish(topic: str, message: dict[str, Any]) -> bool:
         await producer.send_and_wait(topic, message)
         return True
     except Exception as exc:
+        global _producer
+        # Reset the singleton so the next call retries the connection rather
+        # than reusing a broken producer indefinitely.
+        _producer = None
         logger.warning("Kafka publish failed: %s", exc)
         return False
 

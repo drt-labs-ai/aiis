@@ -147,10 +147,11 @@ graph LR
 | **Tool Protocol** | MCP (Model Context Protocol) | Standardized tool definitions for agents |
 | **LLM** | Anthropic Claude or Ollama | Language model for reasoning and classification |
 | **RAG** | ChromaDB + Sentence Transformers | Vector search over knowledge base documents |
-| **Event Store** | Elasticsearch | Time-series event logging and trace storage |
+| **Event Bus** | Kafka (KRaft) | Mandatory event pipeline — all observability events published here |
+| **Event Store** | Elasticsearch | Storage layer — Kafka consumer writes complete payloads here |
 | **Analytics** | Kibana | Dashboard and visualization for investigation data |
 | **Package Manager** | uv | Python dependency management and virtual environment |
-| **Containers** | Docker Compose | Local orchestration of Elasticsearch and Kibana |
+| **Containers** | Docker Compose | Local orchestration of Kafka, Elasticsearch, and Kibana |
 
 ---
 

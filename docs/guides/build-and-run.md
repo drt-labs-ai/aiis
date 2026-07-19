@@ -131,7 +131,7 @@ uv run uvicorn src.api.webhook:app --host 0.0.0.0 --port 8000 --workers 1
 
 ## Running Docker Services
 
-### Starting All Services (Elasticsearch, Kibana, Kafka)
+### Starting All Services (Kafka, Elasticsearch, Kibana)
 
 ```bash
 docker compose up -d
@@ -139,9 +139,9 @@ docker compose up -d
 
 The `-d` flag runs containers in the background (detached mode). Your terminal remains usable.
 
-Docker Compose starts three services: Elasticsearch, Kibana, and Kafka. AIIS's API server uses Kafka as the event bus when `KAFKA_BOOTSTRAP_SERVERS` is set (it is pre-configured in `docker-compose.yml` as `kafka:9092`).
+Docker Compose starts three services: Kafka, Elasticsearch, and Kibana. **Kafka must be running before the AIIS server starts** — it is the mandatory event bus. All observability events flow through Kafka into Elasticsearch; there is no direct fallback.
 
-For local development **without Docker**, leave `KAFKA_BOOTSTRAP_SERVERS` empty — events go directly to Elasticsearch.
+For local development with the server running on the host (outside Docker), set `KAFKA_BOOTSTRAP_SERVERS=localhost:9092` in `.env` (port 9092 is published to the host by the Kafka container).
 
 ### Viewing Logs
 

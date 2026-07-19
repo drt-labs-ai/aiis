@@ -46,7 +46,7 @@ def _index_name() -> str:
 
 async def ingest_event_direct(event: ObservabilityEvent) -> None:
     """Write an event directly to Elasticsearch (used by the Kafka ES-sink consumer)."""
-    global _es_reachable
+    global _es_reachable, _es_client
     client = await _get_client()
     if client is None:
         logger.debug("ES unavailable; event dropped: %s | %s", event.event_type, event.message)
@@ -56,17 +56,20 @@ async def ingest_event_direct(event: ObservabilityEvent) -> None:
         await client.index(index=_index_name(), document=doc)
         _es_reachable = True
     except Exception as exc:
-        _es_reachable = False
-        logger.debug("ES ingest failed (events will be silently dropped): %s", exc)
+        # Reset to None (retry-eligible) rather than permanently disabling.
+        # A transient timeout should not silence all future observability writes.
+        _es_reachable = None
+        _es_client = None
+        logger.debug("ES ingest failed (will retry on next event): %s", exc)
 
 
 async def ingest_event(event: ObservabilityEvent) -> None:
-    """Publish event to Kafka (preferred) or write directly to ES (fallback)."""
+    """Publish event to Kafka topic aiis.observability. Events are dropped if Kafka is unavailable."""
     from src.kafka.producer import publish
     from src.kafka.topics import OBSERVABILITY
     published = await publish(OBSERVABILITY, event.model_dump(mode="json"))
     if not published:
-        await ingest_event_direct(event)
+        logger.warning("Kafka unavailable; observability event dropped: %s | %s", event.event_type, event.message)
 
 
 async def ensure_index_template() -> None:

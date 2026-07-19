@@ -84,7 +84,8 @@ graph LR
 | **RAG** | ChromaDB + Sentence Transformers, per-domain collections |
 | **ReAct Loop** | Domain agents iterate: Observe → Reason → Retrieve → Call → Evaluate |
 | **Distributed Tracing** | `TraceContext` propagated through all layers via `ContextVar` |
-| **Observability** | Structured JSON logs + 19 Elasticsearch event types |
+| **Event Bus** | Kafka (KRaft) — mandatory pipeline; all 19 event types with complete payloads |
+| **Observability** | Kafka → ES-sink consumer → Elasticsearch + Kibana dashboards |
 
 ---
 
@@ -266,7 +267,7 @@ For connecting a real GitHub webhook on staging or production, see [docs/guides/
 ## Docker Compose
 
 ```bash
-# Start Elasticsearch + Kibana
+# Start Kafka + Elasticsearch + Kibana (Kafka must be up before the AIIS server)
 docker compose up -d
 
 # View logs
@@ -282,6 +283,7 @@ docker compose down
 Access:
 
 - **API**: <http://localhost:8000>
+- **Kafka**: `localhost:9092`
 - **Kibana**: <http://localhost:5601>
 - **Elasticsearch**: <http://localhost:9200>
 

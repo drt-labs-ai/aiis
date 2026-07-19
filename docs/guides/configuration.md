@@ -228,7 +228,7 @@ Set the same value in both `.env` and the GitHub webhook configuration.
 
 ### Kafka Event Bus
 
-Kafka is the event bus for all AIIS observability events. When configured, every `ingest_event()` call publishes to the `aiis.observability` Kafka topic. The built-in ES-sink consumer reads that topic and writes to Elasticsearch with complete request/response payloads. When not configured, events go directly to Elasticsearch (backward-compatible with local development).
+Kafka is the **mandatory** event bus for all AIIS observability events. Every `ingest_event()` call publishes to the `aiis.observability` Kafka topic. The built-in ES-sink consumer (`group: aiis-es-sink`) reads from that topic and writes to Elasticsearch with complete request/response payloads. There is no direct agent→ES fallback — Kafka must be running before the AIIS server starts.
 
 ---
 
@@ -236,27 +236,27 @@ Kafka is the event bus for all AIIS observability events. When configured, every
 
 | Property | Value |
 |---|---|
-| **Default** | _(empty — direct ES mode)_ |
-| **Required** | No |
-| **Example** | `kafka:9092`, `broker1:9092,broker2:9092` |
+| **Default** | _(none)_ |
+| **Required** | **Yes** |
+| **Example** | `localhost:9092`, `broker1:9092,broker2:9092` |
 
-Comma-separated list of Kafka broker addresses. Set this to enable the Kafka event bus.
+Comma-separated list of Kafka broker addresses.
 
 | Scenario | Value |
 |---|---|
-| Local dev (no Docker) | _(leave empty)_ — events go directly to ES |
-| Docker Compose | `kafka:9092` — uses the bundled Kafka container |
+| Local dev (server on host, Kafka in Docker) | `localhost:9092` |
+| Docker Compose (all in containers) | `kafka:9092` |
 | External / hosted Kafka | `<broker-host>:<port>` |
 | Multi-broker cluster | `broker1:9092,broker2:9092,broker3:9092` |
 
-**What changes when Kafka is enabled:**
+**How it works:**
 
-- `ingest_event()` publishes to `aiis.observability` topic (fire-and-forget)
-- The ES-sink consumer (`group: aiis-es-sink`) reads and writes to Elasticsearch
-- Events arrive in ES with the full `payload` field containing complete A2A messages, MCP tool arguments/responses, and RAG document contents
-- If Kafka becomes unreachable mid-flight, `ingest_event()` falls back to direct ES writes automatically — no agent downtime
+- `ingest_event()` publishes every observability event to the `aiis.observability` topic
+- The ES-sink consumer reads and writes to Elasticsearch with the full `payload` field — complete A2A messages, MCP tool arguments/responses, and RAG document contents
+- If Kafka is unreachable, the event is **dropped** (logged at WARNING level) — there is no fallback to direct ES writes
+- If the producer encounters a broken connection mid-flight, it resets and retries on the next event
 
-**Non-fatal:** If `KAFKA_BOOTSTRAP_SERVERS` is set but the broker is unreachable at startup, AIIS logs a warning and falls back to direct ES mode. No exception is raised.
+**Start Kafka before starting the AIIS server.** With Docker Compose, `docker compose up -d` starts Kafka automatically.
 
 ---
 

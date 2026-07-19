@@ -292,19 +292,20 @@ The `payload` field carries the **complete request and response body** for each 
 
 ### Architecture Overview
 
-AIIS uses **Kafka as the event bus** and **Elasticsearch as the storage layer**. When `KAFKA_BOOTSTRAP_SERVERS` is set, every call to `ingest_event()` publishes to the Kafka topic `aiis.observability`. A built-in Kafka consumer (the "ES-sink") reads that topic and writes to Elasticsearch with the full `payload` field. When `KAFKA_BOOTSTRAP_SERVERS` is not set (e.g., local development without Docker), events go directly to Elasticsearch as before.
+AIIS uses **Kafka as the mandatory event bus** and **Elasticsearch as the storage layer**. Every call to `ingest_event()` publishes to the Kafka topic `aiis.observability`. The built-in Kafka ES-sink consumer (consumer group `aiis-es-sink`) reads that topic and writes every event to Elasticsearch with the complete `payload` field. There is no direct agent→ES fallback path — Kafka must be running.
 
 ```mermaid
 flowchart LR
-    A[Agent\nemits event] --> B{Kafka\nconfigured?}
-    B -- Yes --> C[Publish to\naiis.observability\nKafka topic]
-    C --> D[ES-sink consumer\nreads message]
+    A[Agent\nemits event] --> B[ingest_event\npublish to Kafka]
+    B --> C[aiis.observability\nKafka topic]
+    C --> D[ES-sink consumer\ngroup: aiis-es-sink]
     D --> E[Write to\nElasticsearch\nwith full payload]
-    B -- No --> E
+    B -- Kafka down\nevent dropped --> X([WARNING logged\nagent continues])
 
     style C fill:#fef9c3,stroke:#eab308
     style D fill:#fef9c3,stroke:#eab308
     style E fill:#f0fdf4,stroke:#22c55e
+    style X fill:#fee2e2,stroke:#ef4444
 ```
 
 ### Kafka Topic
@@ -429,8 +430,7 @@ flowchart TD
     end
 
     subgraph ESClient["src/observability/elasticsearch_client.py"]
-        CB{Kafka\nconfigured?}
-        ING[ingest_event]
+        ING[ingest_event\npublish to Kafka]
         DIRECT[ingest_event_direct\nES circuit breaker]
     end
 
@@ -459,9 +459,7 @@ flowchart TD
     A2 -->|"emit event"| OE
     A3 -->|"emit event"| OE
     OE --> ING
-    ING --> CB
-    CB -->|"yes"| PROD
-    CB -->|"no / fallback"| DIRECT
+    ING --> PROD
     PROD --> TOPIC
     TOPIC --> CONS
     CONS --> DIRECT
@@ -672,17 +670,17 @@ flowchart LR
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `ELASTICSEARCH_URL` | `http://localhost:9200` | Full URL of the Elasticsearch cluster |
-| `KAFKA_BOOTSTRAP_SERVERS` | _(empty)_ | Kafka broker(s). When set, events flow via Kafka. When empty, events go directly to ES |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | Full URL of the Elasticsearch cluster (written to by the ES-sink consumer) |
+| `KAFKA_BOOTSTRAP_SERVERS` | _(none)_ | **Required.** Kafka broker(s). Kafka must be running before the server starts |
 
-**Local development (no Kafka):**
+**Local development (server on host, Kafka in Docker):**
 
 ```bash
 ELASTICSEARCH_URL=http://localhost:9200
-# Leave KAFKA_BOOTSTRAP_SERVERS empty — direct ES writes
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 ```
 
-**Docker Compose (Kafka + ES):**
+**Docker Compose (all containers):**
 
 ```bash
 ELASTICSEARCH_URL=http://elasticsearch:9200
@@ -696,7 +694,7 @@ ELASTICSEARCH_URL=https://your-cluster.es.io:443
 KAFKA_BOOTSTRAP_SERVERS=kafka-broker-1:9092,kafka-broker-2:9092
 ```
 
-If the `elasticsearch` Python package is not installed, the client silently does nothing. If Kafka is configured but unreachable, `ingest_event()` automatically falls back to direct ES writes with no agent impact.
+If Kafka is unreachable, `ingest_event()` logs a WARNING and drops the event — the agent continues normally but observability is lost for that event. There is no fallback to direct ES. Start Kafka before starting the AIIS server.
 
 ---
 
